@@ -38,6 +38,28 @@ jobs:
             exit 1
           fi
 
+      # Release TAGS are not part of a fork's refs, so a fork's checkout has
+      # full history but zero tags. Two gates need them and both fail loudly
+      # rather than degrade: the retired-key gate resolves its comparison base
+      # with `git describe --tags` ("fatal: No names found"), and the v3.3.7
+      # provenance fixture anchors on a release tag. Fetch the parent's tags
+      # (resolved dynamically, never hardcoded) so a fork is as releasable as
+      # the upstream. A non-fork checkout already has them and the fetch is a
+      # no-op. Placed after the secret scan so that still runs first.
+      - name: Fetch upstream release tags (a fork does not inherit them)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          parent="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.parent.full_name // ""')"
+          if [ -n "$parent" ]; then
+            echo "Fetching release tags from parent: $parent"
+            git fetch --quiet --no-tags "https://github.com/$parent" 'refs/tags/*:refs/tags/*'
+          fi
+          echo "tags available: $(git tag | wc -l | tr -d ' ')"
+          git describe --tags --always >/dev/null 2>&1 || git rev-parse --short HEAD
+
       # No `version:` here — pnpm/action-setup reads the `packageManager` field in package.json
       # (the Node-20-compatible pinned pnpm version). Specifying both causes
       # ERR_PNPM_BAD_PM_VERSION.

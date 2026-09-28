@@ -56,9 +56,13 @@ function reapMk(...args: Parameters<typeof mkdtempSync>): string {
   __reapDirs.push(dir);
   return dir;
 }
+// W-h: reap every temp dir this suite creates so the gate stops leaking tmpdirs.
+// The explicit timeout matters: this file is ~16k lines and reaps every tree it
+// created, which overruns vitest's 10s default on a loaded CI runner and fails
+// the whole file as a hook error even when all 5700+ tests pass.
 __afterAllReap(() => {
   for (const dir of __reapDirs.splice(0)) __rmSyncReap(dir, { recursive: true, force: true });
-});
+}, 120_000);
 
 /**
  * Project a run's D8 axes (lifecycle + facts) back to the LEGACY status word

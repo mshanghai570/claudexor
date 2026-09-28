@@ -32,6 +32,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      # A fork's refs carry no release TAGS, and build-app.sh stamps the build
+      # sha from git when CLAUDEXOR_BUILD_SHA is absent. Fetch the parent's
+      # tags (resolved dynamically) so version stamping is identical here and
+      # on a non-fork checkout.
+      - name: Fetch upstream release tags (a fork does not inherit them)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          parent="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.parent.full_name // ""')"
+          if [ -n "$parent" ]; then
+            git fetch --quiet --no-tags "https://github.com/$parent" 'refs/tags/*:refs/tags/*'
+          fi
+          echo "tags available: $(git tag | wc -l | tr -d ' ')"
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
