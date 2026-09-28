@@ -1,4 +1,5 @@
-import { delegationBeltFor } from "./delegationBelt.js";
+import { extraMcpServersFor } from "./delegationBelt.js";
+import { resolveRunSkills } from "./skills.js";
 import {
   bindProcessingAdmission,
   processingAdmissionForLease,
@@ -699,6 +700,10 @@ export interface RoutedAdapter {
    * cancels it below full). A delegate lane below full access on such a harness
    * degrades to ordinary Agent with a typed receipt. */
   mcpInjectionRequiresFullAccess: boolean;
+  /** Manifest `capability_profile.skill_injection`: only such routes receive
+   * engine-resolved Agent Skills; every other lane gets an empty list rather
+   * than a skill claim it cannot honor. */
+  supportsSkillInjection: boolean;
   implementationTransport: ImplementationTransport;
   settings: HarnessRouteSettings | null;
 }
@@ -1465,6 +1470,7 @@ export class Orchestrator {
           supportsMcpInjection: manifest.capability_profile.mcp_injection,
           mcpInjectionRequiresFullAccess:
             manifest.capability_profile.mcp_injection_requires_full_access,
+          supportsSkillInjection: manifest.capability_profile.skill_injection,
           implementationTransport: manifest.capabilities.implementation_transport,
           settings: cfgEntry
             ? {
@@ -2420,7 +2426,18 @@ export class Orchestrator {
           ? ""
           : join(envelope.worktree_path, artifactRelativeDir, CLAUDEXOR_BROWSER_ARTIFACT_SUBDIR),
       ),
-      extra_mcp_servers: delegationBeltFor(runInput, intent, routed, contract.budget.paid_budget),
+      extra_mcp_servers: extraMcpServersFor(
+        runInput,
+        intent,
+        routed,
+        contract.budget.paid_budget,
+        this.config(contract.repo.root)?.global,
+      ),
+      skills: resolveRunSkills({
+        config: this.config(contract.repo.root)?.global,
+        projectRoot: contract.repo.root,
+        supportsSkillInjection: routed.supportsSkillInjection,
+      }).skills,
       cwd: envelope.worktree_path,
       access: routed.adapterAccess,
       ...this.harnessSpecKnobs(contract, knobs, intent),

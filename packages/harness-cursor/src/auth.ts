@@ -3,7 +3,9 @@ import type { AuthPreference } from "@claudexor/schema";
 import { runCapture } from "@claudexor/core";
 import { redactSecrets } from "@claudexor/util";
 
-const BIN = process.env.CLAUDEXOR_CURSOR_BIN || "cursor-agent";
+/** The vendor binary this adapter drives. Exported so the doctor probe
+ *  diagnoses the SAME binary the auth probes spawn (INV-067 same-env doctrine). */
+export const BIN = process.env.CLAUDEXOR_CURSOR_BIN || "cursor-agent";
 const CURSOR_LOGGED_OUT =
   /not logged in|not authenticated|unauthenticated|authentication required|no account|account\s*:\s*(?:none|unknown|not configured|-)(?:\s|$)|authenticated\s*:\s*(?:false|no|none|0)|logged in\s*:\s*(?:false|no|none|0)/i;
 const CURSOR_JSON_STATUS_UNSUPPORTED =

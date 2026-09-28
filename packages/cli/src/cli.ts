@@ -7,6 +7,8 @@ import { CLAUDEXOR_VERSION, noProjectRepoRoot, readTextSafe, userConfigDir } fro
 import { resolveInstructions } from "./run-options.js";
 import { releaseCommand } from "./release-command.js";
 import { serveBeltBridge, serveMcpBridge } from "./bridge-serve.js";
+import { providersCommand } from "./provider-commands.js";
+import { skillsCommand } from "./skill-commands.js";
 import { dispatchAcpCommand } from "./acp-auth-command.js";
 import { initProjectConfig } from "@claudexor/config";
 import {
@@ -1029,6 +1031,12 @@ async function dispatch(args: ParsedArgs, outputMode: CliOutputMode): Promise<nu
       if (args._[1] === "serve-belt") return serveBeltBridge();
       return printUsageError(json, "usage: claudexor mcp serve");
     }
+
+    case "providers":
+      return providersCommand(args, json).status;
+
+    case "skills":
+      return (await skillsCommand(args, json)).status;
 
     case "acp": {
       return dispatchAcpCommand(args, json);

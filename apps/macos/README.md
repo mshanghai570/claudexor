@@ -17,10 +17,18 @@ not build it as part of normal package tasks.
 
 ## Toolchain
 
-The app targets macOS 26 SDK features such as the Liquid Glass APIs
-(`glassEffect`, `GlassEffectContainer`) and `.inspector`. (The shell is a
-custom chat cockpit, not `NavigationSplitView` — see
-`docs/DESIGN_SYSTEM.md` §3.) Use one of these setups:
+The app's deployment floor is **macOS 15 (Sequoia)**, so it launches on Intel
+Macs as well as Apple Silicon. Liquid Glass (`glassEffect`,
+`GlassEffectContainer`) is still the chrome on macOS 26 — first-class, not
+behavior-gated — but below macOS 26 there is no glass to render, so every glass
+surface falls back to the SOLID chrome recipe the design system already
+specifies for Reduce Transparency. That gate lives in exactly one place
+(`LiquidGlassChrome` in
+`apps/macos/ClaudexorApp/Sources/ClaudexorApp/DesignSystemComponents.swift`) and the Intel app lane
+proves the non-glass path still builds and launches. The shell remains a custom
+chat cockpit, not `NavigationSplitView` — see `docs/DESIGN_SYSTEM.md` §3.
+The CLI/daemon are architecture-independent — see
+`docs/DEVELOPMENT.md` § Intel (x86_64) macOS. Use one of these setups:
 
 1. Full Xcode 26 for distribution builds and notarization.
 2. Swiftly + swift.org Swift 6.3+ for local SwiftPM build/test work.
@@ -77,7 +85,14 @@ the Developer ID certificate from repository secrets) and are built by
 `.github/workflows/release.yml` on a macOS runner from the pushed tag/sha, then
 attached to the draft release with `GITHUB_TOKEN`. Do not upload local
 `apps/macos/dist` artifacts as final release assets. Release notes must also
-call out the macOS 26 minimum.
+call out the macOS 15 minimum. `build-app.sh` builds for the HOST architecture
+on purpose (the release lane builds on an Apple Silicon runner, so its asset is
+an arm64 slice); set `CLAUDEXOR_ARCH=x86_64` (Intel), `arm64`, or `universal`
+(fat arm64+x86_64) to target a slice explicitly — cross/non-host artifacts get
+a `-macos-<arch>` name tag (`Claudexor-<v>-unsigned-macos-x64.dmg`) so an
+Intel DMG and an Apple Silicon DMG never collide. On an Intel Mac the default
+host build IS the Intel app; verify the slice with
+`lipo -info apps/macos/dist/bundle.noindex/Claudexor.app/Contents/MacOS/ClaudexorApp`.
 
 `build-app.sh` also copies SwiftPM's generated
 `ClaudexorApp_ClaudexorApp.bundle` into `Contents/Resources`, the only place it

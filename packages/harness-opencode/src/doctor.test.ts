@@ -3,12 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   resolveSecret: vi.fn(),
   runCapture: vi.fn(),
+  brokenInstallAdvisory: vi.fn(),
 }));
 
 vi.mock("@claudexor/secrets", () => ({ resolveSecret: mocks.resolveSecret }));
 vi.mock("@claudexor/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@claudexor/core")>();
-  return { ...actual, runCapture: mocks.runCapture };
+  return {
+    ...actual,
+    runCapture: mocks.runCapture,
+    brokenInstallAdvisory: mocks.brokenInstallAdvisory,
+  };
 });
 
 import { createOpenCodeAdapter } from "./index.js";
@@ -141,5 +146,42 @@ describe("opencode manifest access profiles", () => {
   it("declares only trusted full and inherit-native", async () => {
     const manifest = await createOpenCodeAdapter().discover();
     expect(manifest.access_profiles_supported).toEqual(["full", "inherit_native"]);
+  });
+});
+
+describe("opencode missing-CLI diagnosis", () => {
+  const ADVISORY =
+    "/Users/x/.local/bin/opencode exists but it is not executable — reinstall opencode or point the binary override at a working install";
+
+  beforeEach(() => {
+    mocks.resolveSecret.mockReset().mockReturnValue(null);
+    mocks.brokenInstallAdvisory.mockReset().mockReturnValue(null);
+    // A version probe that throws is how a missing binary presents.
+    mocks.runCapture.mockReset().mockRejectedValue(new Error("ENOENT"));
+  });
+
+  it("surfaces the broken-install advisory in the installed check and reasons", async () => {
+    mocks.brokenInstallAdvisory.mockReturnValue(ADVISORY);
+    const report = await createOpenCodeAdapter().doctor({ cwd: "/repo", env: {} });
+    expect(report.status).toBe("unavailable");
+    expect(report.checks[0]).toEqual({
+      id: "installed",
+      status: "fail",
+      detail: `opencode not found — ${ADVISORY}`,
+    });
+    expect(report.reasons).toContain(ADVISORY);
+  });
+
+  it("keeps the plain dead-end wording when there is no advisory evidence", async () => {
+    const report = await createOpenCodeAdapter().doctor({ cwd: "/repo", env: {} });
+    expect(report.checks[0]).toEqual({
+      id: "installed",
+      status: "fail",
+      detail: "opencode not found",
+    });
+    expect(report.reasons).toEqual([
+      "opencode not found (install OpenCode or set CLAUDEXOR_OPENCODE_BIN)",
+      "opencode provider auth not configured",
+    ]);
   });
 });

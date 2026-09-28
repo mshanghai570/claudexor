@@ -535,7 +535,9 @@ struct ThreadsScreen: View {
     }
 
     private var composer: some View {
-        GlassEffectContainer(spacing: Theme.Spacing.sm) {
+        // The composer's glass cluster (macOS 26) / plain cluster below it — see
+        // LiquidGlassChrome. The inner VStack owns the layout either way.
+        GlassChromeCluster(spacing: Theme.Spacing.sm) {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 composerControlsRow
                 composerHint

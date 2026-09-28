@@ -1,7 +1,11 @@
 # Claudexor for macOS — Design System
 
 Status: living document. SSOT for the native macOS app's visual + interaction design.
-Target platform: macOS 26 (Tahoe), SwiftUI/AppKit, Liquid Glass. Apple Silicon.
+Target platform: macOS 15+, SwiftUI/AppKit, Liquid Glass. Apple Silicon and Intel.
+On macOS 26 (Tahoe) Liquid Glass is the chrome, first-class; below it every glass
+surface renders the SOLID chrome recipe this document already specifies for
+Reduce Transparency, so the app is runnable on Intel Macs (which macOS 26 never
+reaches) without a second design language. See §3.1 for the one gate.
 
 This document is normative. The app implements these tokens and rules; deviations
 must be justified here. It pairs with [`../CLAUDEXOR_BIBLE.md`](../CLAUDEXOR_BIBLE.md)
@@ -363,9 +367,18 @@ message" help). An unselectable content surface is a defect, not a style choice.
 - Test every screen with Reduce Transparency, Reduce Motion, Increase Contrast, and the
   system Liquid Glass tint settings.
 
-### 3.1 macOS 26 Liquid Glass APIs (first-class, not availability-gated)
+### 3.1 macOS 26 Liquid Glass APIs (first-class on Tahoe, solid chrome below)
 
-The app targets macOS 26 (Tahoe), so these are used directly (no `if #available`):
+Liquid Glass is the chrome on macOS 26 and used directly there (no behavioral
+gate). The deployment floor is macOS 15, where these symbols do not exist, so
+exactly ONE predicate decides availability — `LiquidGlassChrome` in
+`apps/macos/ClaudexorApp/Sources/ClaudexorApp/DesignSystemComponents.swift` —
+and each glass surface reads
+`if #available(macOS 26.0, *), !reduceTransparency`, falling back to the same
+SOLID recipe (`surfaceRaised` + hairline) that Reduce Transparency already uses.
+Below macOS 26 the app therefore reads as its own documented degraded
+appearance, not a new one. Do NOT scatter `#available` checks: route new glass
+through the existing modifiers, or add a case to that one gate.
 
 - **`glassEffect(.regular[.tint(...)], in: shape)`** — the floating chrome surface
   (composer panel, floating actions). Use **static `.regular`** — NOT `.interactive()`:

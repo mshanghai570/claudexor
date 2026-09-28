@@ -182,7 +182,7 @@ jobs:
   # matrix fails or is cancelled, and a skipped required check never reports.
   build-test-gate:
     name: build-test
-    needs: [build-test, windows-test, swift]
+    needs: [build-test, windows-test, swift, macos-intel]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -193,6 +193,7 @@ jobs:
           MATRIX_RESULT: ${{ needs.build-test.result }}
           WINDOWS_RESULT: ${{ needs.windows-test.result }}
           MACOS_RESULT: ${{ needs.swift.result }}
+          MACOS_INTEL_RESULT: ${{ needs.macos-intel.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -206,6 +207,10 @@ jobs:
           fi
           if [ "$MACOS_RESULT" != "success" ]; then
             echo "::error::macOS lane result is '$MACOS_RESULT' (expected 'success')."
+            exit 1
+          fi
+          if [ "$MACOS_INTEL_RESULT" != "success" ]; then
+            echo "::error::macOS Intel lane result is '$MACOS_INTEL_RESULT' (expected 'success')."
             exit 1
           fi
 
@@ -382,3 +387,102 @@ jobs:
       - name: Swift tests and build (ClaudexorApp)
         working-directory: apps/macos/ClaudexorApp
         run: swift test && swift build
+
+  # The ONLY lane that executes the x86_64 slice of the universal Darwin
+  # process-identity helper natively. Every other lane is arm64 (swift,
+  # package-macos) or Linux, and the arm64-hosted release PTY smoke only ever
+  # exercises darwin-arm64; without this lane the Intel path the CLI and daemon
+  # rely on could regress with no signal. `macos-15-intel` is GitHub's last
+  # x86_64 macOS image — macos-13 retired 2025-12-04 and this replacement is
+  # supported only through August 2027, so the lane is expected to disappear
+  # with the architecture rather than drift silently.
+  #
+  # The app IS built here. Its floor is macOS 15 and every Liquid Glass surface
+  # is gated by `LiquidGlassChrome` (#available(macOS 26)), so the Intel build is
+  # the only place the non-glass path is COMPILED against the real x86_64
+  # toolchain — the arm64 `swift` lane cannot catch an ungated Tahoe-only API.
+  # The app's TEST SUITE stays on macos-26 (its process-spawn timing budgets are
+  # not meaningful on a throttled 4-core runner); this lane asserts the artifact:
+  # an x86_64 binary with a macOS 15.0 minimum.
+  macos-intel:
+    name: macOS Intel (x86_64)
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `pnpm build` compiles the helper with `-arch arm64 -arch x86_64`; on an
+      # Intel runner the x86_64 slice is the one that actually runs, so this is
+      # the only place both compilation and execution of that slice happen.
+      - name: Build (compiles the universal Darwin helper on Intel)
+        run: pnpm build
+
+      - name: Assert the Darwin helper still carries both slices
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=packages/core/dist/native/claudexor-process-identity
+          test -x "$helper"
+          slices="$(/usr/bin/lipo -archs "$helper")"
+          for arch in x86_64 arm64; do
+            case " $slices " in
+              *" $arch "*) ;;
+              *) echo "::error::$helper is missing the $arch slice ($slices)"; exit 1 ;;
+            esac
+          done
+
+      - name: Verify the Darwin npm package (universal helper + proc_pidinfo identity)
+        run: node scripts/verify-npm-darwin-package.mjs --built-package packages/core
+
+      - name: Build and probe engine resources independently of the app
+        shell: bash
+        env:
+          CLAUDEXOR_BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          resources="$RUNNER_TEMP/engine-resources"
+          bash scripts/build-engine-resources.sh "$resources"
+          node "$resources/claudexord.bundle.cjs" --probe
+          node "$resources/claudexor.bundle.cjs" help --json
+
+      - name: Build the app for x86_64 (macOS 15 floor, availability audit)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This image's default toolchain is Xcode 16.4 (Swift 6.0), which cannot
+          # parse this package's swift-tools-version:6.2 nor supply the macOS 26
+          # SDK the glass paths are gated against. Select the newest Xcode 26 the
+          # image ships (matched, not pinned, so an image refresh does not break
+          # the required gate the day it drops one build).
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XCODE" ] || { echo "::error::no Xcode 26 on this image"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          cd apps/macos/ClaudexorApp
+          swift build
+          bin=.build/debug/ClaudexorApp
+          file "$bin" | grep -q 'x86_64' \
+            || { echo "::error::$bin is not an x86_64 binary"; file "$bin"; exit 1; }
+          /usr/bin/otool -l "$bin" | grep -A3 LC_BUILD_VERSION | grep -q 'minos 15.0' \
+            || { echo "::error::$bin does not carry the macOS 15.0 deployment floor"; /usr/bin/otool -l "$bin" | grep -A3 LC_BUILD_VERSION; exit 1; }
+
+      - name: Typecheck (packages + tests + scripts)
+        run: pnpm typecheck && pnpm typecheck:tests
+
+      - name: Architecture-sensitive suites (native x86_64 execution)
+        run: >
+          pnpm vitest run
+          packages/core/src/process-identity.test.ts
+          packages/core/src/runtime-env.test.ts
+          packages/core/src/process-tree.test.ts
+          packages/schema/src/platform-auth-policy.test.ts

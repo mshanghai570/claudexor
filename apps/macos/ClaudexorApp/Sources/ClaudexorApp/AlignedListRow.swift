@@ -39,13 +39,20 @@ struct AlignedRowDetail: Equatable, Identifiable {
     var text: String
     var emphasis: AlignedRowEmphasis = .secondary
     var monospacedDigit: Bool = false
+    /// Which end a too-long line sacrifices. `.tail` (the default) keeps the
+    /// START, which is right for prose ("agy not found (install…"). A resolved
+    /// absolute PATH wants the opposite: the informative end is the binary
+    /// itself, never `/Users/someone/…`, so it passes `.head`.
+    var truncation: Text.TruncationMode = .tail
 
     init(_ id: Int = 0, _ text: String,
-         emphasis: AlignedRowEmphasis = .secondary, monospacedDigit: Bool = false) {
+         emphasis: AlignedRowEmphasis = .secondary, monospacedDigit: Bool = false,
+         truncation: Text.TruncationMode = .tail) {
         self.id = id
         self.text = text
         self.emphasis = emphasis
         self.monospacedDigit = monospacedDigit
+        self.truncation = truncation
     }
 
     /// The rendered form: runs of whitespace (spaces, tabs, newlines) collapse to
@@ -116,7 +123,7 @@ struct AlignedRowIdentity: View {
                         .foregroundStyle(detail.emphasis.style)
                         .modifier(MonospacedDigitIf(on: detail.monospacedDigit))
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                        .truncationMode(detail.truncation)
                         .help(detail.text)
                 }
             }

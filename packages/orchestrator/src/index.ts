@@ -1,6 +1,7 @@
 export * from "./orchestrator.js";
 export * from "./requestRequirements.js";
 export * from "./delegationBudgetAuthority.js";
+export * from "./skills.js";
 export * from "./routing-failure.js";
 export * from "./live-input.js";
 export { assertCouncilWidth } from "./council.js";

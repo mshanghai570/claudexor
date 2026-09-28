@@ -159,6 +159,9 @@ function buildManifest(id: string, provider: ProviderFamily): HarnessManifest {
       // The fake spawns no sandbox, so its belt is reachable at any access —
       // keep delegate exercisable at the default write access deterministically.
       mcp_injection_requires_full_access: false,
+      // The fake loads no plugin, but it declares the capability so the engine's
+      // skills-resolution path is exercisable deterministically offline.
+      skill_injection: true,
       attachment_inputs: [],
     },
     capabilities: {

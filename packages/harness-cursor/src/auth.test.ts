@@ -1576,3 +1576,38 @@ describe("models() under a pinned credential profile (INV-135 x INV-104)", () =>
     expect(models).toEqual([]);
   });
 });
+
+describe("cursor missing-CLI diagnosis", () => {
+  const ADVISORY =
+    "/Users/x/.local/bin/cursor-agent (symlink to /Users/x/.local/share/cursor-agent/versions/2026.08.31-4057e58/cursor-agent) exists but its target is missing — reinstall cursor-agent or point the binary override at a working install";
+
+  it("surfaces the broken-install advisory in the installed check and reasons", async () => {
+    const adapter = createCursorAdapter({
+      detectVersion: async () => null,
+      brokenInstallAdvisory: () => ADVISORY,
+    });
+    const report = await adapter.doctor({ cwd: "/repo", env: {} });
+    expect(report.status).toBe("unavailable");
+    expect(report.checks).toEqual([
+      { id: "installed", status: "fail", detail: `cursor-agent not found — ${ADVISORY}` },
+    ]);
+    expect(report.reasons).toEqual([
+      "cursor-agent not found (install Cursor CLI or set CLAUDEXOR_CURSOR_BIN)",
+      ADVISORY,
+    ]);
+  });
+
+  it("keeps the plain dead-end wording when there is no advisory evidence", async () => {
+    const adapter = createCursorAdapter({
+      detectVersion: async () => null,
+      brokenInstallAdvisory: () => null,
+    });
+    const report = await adapter.doctor({ cwd: "/repo", env: {} });
+    expect(report.checks).toEqual([
+      { id: "installed", status: "fail", detail: "cursor-agent not found" },
+    ]);
+    expect(report.reasons).toEqual([
+      "cursor-agent not found (install Cursor CLI or set CLAUDEXOR_CURSOR_BIN)",
+    ]);
+  });
+});

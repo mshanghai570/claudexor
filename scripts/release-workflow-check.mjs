@@ -52,6 +52,7 @@ const packageMacosJob = jobBody(release, "package-macos");
 const publishNpmJob = jobBody(release, "publish-npm");
 const publishReleaseJob = jobBody(release, "publish-release");
 errors.push(...windowsPrLegFindings(ci));
+errors.push(...intelMacFindings(ci));
 errors.push(...windowsConptyCustodyFindings(release));
 errors.push(...windowsConptyBuildFindings(win32ConptyBuild));
 const engineResourcesStep = stepBody(
@@ -571,10 +572,54 @@ for (const [label, mutated] of [
   ["Windows agy acceptance ordered before native fixture build", delayedWindowsFixtureCi],
   [
     "Windows matrix removed from required aggregate",
-    ci.replace("    needs: [build-test, windows-test, swift]", "    needs: [build-test, swift]"),
+    ci.replace(
+      "    needs: [build-test, windows-test, swift, macos-intel]",
+      "    needs: [build-test, swift, macos-intel]",
+    ),
   ],
 ]) {
   if (mutated === ci || windowsPrLegFindings(mutated).length === 0) {
+    errors.push(`release-workflow-check self-test: failed to reject ${label}`);
+  }
+}
+for (const [label, mutated] of [
+  [
+    "x86_64 macOS lane dropped from the required aggregate",
+    ci.replace(
+      "    needs: [build-test, windows-test, swift, macos-intel]",
+      "    needs: [build-test, windows-test, swift]",
+    ),
+  ],
+  [
+    "x86_64 macOS lane moved off the Intel image",
+    ci.replace(
+      "  macos-intel:\n    name: macOS Intel (x86_64)\n    runs-on: macos-15-intel",
+      "  macos-intel:\n    name: macOS Intel (x86_64)\n    runs-on: macos-26",
+    ),
+  ],
+  [
+    "x86_64 macOS lane lost its universal-slice assertion",
+    ci.replace(
+      '          slices="$(/usr/bin/lipo -archs "$helper")"\n',
+      '          slices="$(/usr/bin/lipo -info "$helper")"\n',
+    ),
+  ],
+  [
+    "x86_64 macOS lane stopped building the app",
+    ci.replace(
+      "          cd apps/macos/ClaudexorApp\n          swift build\n",
+      "          cd apps/macos/ClaudexorApp\n",
+    ),
+  ],
+  [
+    "x86_64 macOS lane stopped proving the app's deployment floor",
+    ci.replace(
+      "          /usr/bin/otool -l \"$bin\" | grep -A3 LC_BUILD_VERSION | grep -q 'minos 15.0'",
+      "          true",
+    ),
+  ],
+]) {
+  if (mutated === ci || intelMacFindings(mutated).length === 0) {
     errors.push(`release-workflow-check self-test: failed to reject ${label}`);
   }
 }
@@ -1024,7 +1069,75 @@ function windowsPrLegFindings(workflow) {
   }
   requirePattern(
     "required build-test aggregate must depend on and reject a failed Windows matrix",
-    /needs:\s*\[build-test, windows-test, swift\][\s\S]*?WINDOWS_RESULT:[\s\S]*?\[ "\$WINDOWS_RESULT" != "success" \]/,
+    /needs:\s*\[build-test, windows-test, swift, macos-intel\][\s\S]*?WINDOWS_RESULT:[\s\S]*?\[ "\$WINDOWS_RESULT" != "success" \]/,
+    gate,
+  );
+  return findings;
+}
+
+/**
+ * The x86_64 macOS lane is the only GitHub-hosted job that executes the Intel
+ * slice of the universal Darwin helper natively — every other lane is arm64 or
+ * Linux. It is required by the branch-protection aggregate, so deleting it or
+ * quietly moving it back onto an arm64 image must fail this contract rather
+ * than silently erase the only x86_64 signal.
+ */
+function intelMacFindings(workflow) {
+  const findings = [];
+  const intel = jobSection(workflow, "macos-intel");
+  const gate = jobSection(workflow, "build-test-gate");
+  if (!intel) {
+    findings.push("ci.yml: required x86_64 macOS lane (macos-intel) is missing");
+    return findings;
+  }
+  const requirePattern = (label, pattern, scope = intel) => {
+    if (!scope || !pattern.test(scope)) findings.push(`ci.yml: ${label}`);
+  };
+  requirePattern(
+    "x86_64 macOS lane must run on the macos-15-intel image",
+    /^\s{4}runs-on:\s*macos-15-intel\s*$/m,
+  );
+  requirePattern("x86_64 macOS lane must build the workspace", /^\s+run: pnpm build\s*$/m);
+  requirePattern(
+    "x86_64 macOS lane must typecheck packages and tests",
+    /pnpm typecheck && pnpm typecheck:tests/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must assert the universal helper still carries both slices",
+    /\/usr\/bin\/lipo -archs[\s\S]*?x86_64[\s\S]*?arm64/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must verify the Darwin npm package",
+    /verify-npm-darwin-package\.mjs --built-package/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must build and probe the independent engine stage",
+    /bash scripts\/build-engine-resources\.sh/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must run the architecture-sensitive suites natively",
+    /process-identity\.test\.ts[\s\S]*?platform-auth-policy\.test\.ts/,
+  );
+  // The app floors at macOS 15 and gates Liquid Glass behind #available(macOS 26),
+  // so the x86_64 build is the only place the non-glass path is compiled against
+  // a real Intel toolchain. Require the selection of a 26 SDK (the image's default
+  // is Xcode 16.4), the build, and the artifact proof — an x86_64 binary with a
+  // macOS 15.0 minimum. Dropping any of these silently reopens the port.
+  requirePattern(
+    "x86_64 macOS lane must select an Xcode 26 toolchain before building the app",
+    /ls -d \/Applications\/Xcode_26\*\.app[\s\S]*?xcode-select -s/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must build the app",
+    /cd apps\/macos\/ClaudexorApp[\s\S]*?swift build/,
+  );
+  requirePattern(
+    "x86_64 macOS lane must prove the app binary is x86_64 at the macOS 15 floor",
+    /file "\$bin" \| grep -q 'x86_64'[\s\S]*?minos 15\.0/,
+  );
+  requirePattern(
+    "required build-test aggregate must depend on and reject a failed x86_64 macOS lane",
+    /needs:\s*\[build-test, windows-test, swift, macos-intel\][\s\S]*?MACOS_INTEL_RESULT:[\s\S]*?\[ "\$MACOS_INTEL_RESULT" != "success" \]/,
     gate,
   );
   return findings;

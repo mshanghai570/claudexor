@@ -15,6 +15,7 @@ import {
 import type { DoctorSpec, HarnessAdapter } from "@claudexor/core";
 import {
   AccessProfileIncompatibleError,
+  brokenInstallAdvisory,
   HarnessUnavailableError,
   promptWithInstructions,
   providerScrubEnv,
@@ -173,8 +174,11 @@ export function createOpenCodeAdapter(): HarnessAdapter {
     async discover(): Promise<HarnessManifest> {
       const version = await detectVersion();
       if (version === null) {
+        const advisory = brokenInstallAdvisory(BIN);
         throw new HarnessUnavailableError(
-          "opencode not found on PATH (set CLAUDEXOR_OPENCODE_BIN)",
+          `opencode not found on PATH (set CLAUDEXOR_OPENCODE_BIN)${
+            advisory ? ` — ${advisory}` : ""
+          }`,
         );
       }
       const authReady = providerKeyAvailable();
@@ -227,6 +231,10 @@ export function createOpenCodeAdapter(): HarnessAdapter {
 
     async doctor(spec: DoctorSpec): Promise<ConformanceReport> {
       const version = await detectVersion();
+      // Computed once, used by both missing-CLI reports below: when the
+      // filesystem still holds evidence of a broken install, say so instead of
+      // dead-ending at "not found" (same contract as the Codex adapter).
+      const missingInstall = version === null ? brokenInstallAdvisory(BIN) : null;
       const requestedSource = spec.authSource;
       if (requestedSource !== undefined && requestedSource !== "api_key_env") {
         return ConformanceReportSchema.parse({
@@ -234,7 +242,13 @@ export function createOpenCodeAdapter(): HarnessAdapter {
           status: "unavailable",
           checks: [
             version === null
-              ? { id: "installed", status: "fail", detail: "opencode not found" }
+              ? {
+                  id: "installed",
+                  status: "fail",
+                  detail: missingInstall
+                    ? `opencode not found — ${missingInstall}`
+                    : "opencode not found",
+                }
               : { id: "installed", status: "pass", detail: redactSecrets(version) },
             {
               id: "auth_source",
@@ -246,7 +260,10 @@ export function createOpenCodeAdapter(): HarnessAdapter {
           disabled_intents: ALL_OPENCODE_INTENTS,
           reasons: [
             ...(version === null
-              ? ["opencode not found (install OpenCode or set CLAUDEXOR_OPENCODE_BIN)"]
+              ? [
+                  "opencode not found (install OpenCode or set CLAUDEXOR_OPENCODE_BIN)",
+                  ...(missingInstall ? [missingInstall] : []),
+                ]
               : []),
             `opencode does not support auth source ${requestedSource}`,
           ],
@@ -275,13 +292,20 @@ export function createOpenCodeAdapter(): HarnessAdapter {
           harness_id: "opencode",
           status: "unavailable",
           checks: [
-            { id: "installed", status: "fail", detail: "opencode not found" },
+            {
+              id: "installed",
+              status: "fail",
+              detail: missingInstall
+                ? `opencode not found — ${missingInstall}`
+                : "opencode not found",
+            },
             { id: "provider_auth", status: authReady ? "pass" : "fail", detail: readiness.detail },
           ],
           enabled_intents: [],
           disabled_intents: ALL_OPENCODE_INTENTS,
           reasons: [
             "opencode not found (install OpenCode or set CLAUDEXOR_OPENCODE_BIN)",
+            ...(missingInstall ? [missingInstall] : []),
             ...(authReady ? [] : ["opencode provider auth not configured"]),
           ],
           auth_sources: [readiness],

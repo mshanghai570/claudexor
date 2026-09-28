@@ -76,3 +76,6 @@ apps/macos/dist/
 
 # Local icon-generation scratch (not product source)
 .iconjobs/
+
+# Local Freebuff workspace metadata (per-checkout, never product source)
+.freebuff/

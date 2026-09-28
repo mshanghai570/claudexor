@@ -849,3 +849,46 @@ describe("Claude transport-aware source selection", () => {
     });
   });
 });
+
+describe("claude missing-CLI diagnosis", () => {
+  const ADVISORY =
+    "/Users/x/.local/bin/claude (symlink to /Users/x/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe) exists but its target is missing — reinstall claude or point the binary override at a working install";
+
+  it("surfaces the broken-install advisory in the installed check and reasons", async () => {
+    const adapter = createClaudeAdapter({
+      detectVersion: async () => null,
+      brokenInstallAdvisory: () => ADVISORY,
+    });
+    const report = await adapter.doctor({ cwd: "/repo", env: {} });
+    expect(report.status).toBe("unavailable");
+    expect(report.checks).toEqual([
+      { id: "installed", status: "fail", detail: `claude not found on PATH — ${ADVISORY}` },
+    ]);
+    expect(report.reasons).toEqual([
+      "claude CLI not found (install Claude Code or set CLAUDEXOR_CLAUDE_BIN)",
+      ADVISORY,
+    ]);
+  });
+
+  it("keeps the plain dead-end wording when there is no advisory evidence", async () => {
+    const adapter = createClaudeAdapter({
+      detectVersion: async () => null,
+      brokenInstallAdvisory: () => null,
+    });
+    const report = await adapter.doctor({ cwd: "/repo", env: {} });
+    expect(report.checks).toEqual([
+      { id: "installed", status: "fail", detail: "claude not found on PATH" },
+    ]);
+    expect(report.reasons).toEqual([
+      "claude CLI not found (install Claude Code or set CLAUDEXOR_CLAUDE_BIN)",
+    ]);
+  });
+
+  it("discover appends the advisory to the unavailable error", async () => {
+    const adapter = createClaudeAdapter({
+      detectVersion: async () => null,
+      brokenInstallAdvisory: () => ADVISORY,
+    });
+    await expect(adapter.discover()).rejects.toThrow(ADVISORY);
+  });
+});

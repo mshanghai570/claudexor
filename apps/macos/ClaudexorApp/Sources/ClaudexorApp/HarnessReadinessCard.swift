@@ -110,6 +110,17 @@ struct HarnessReadinessPresentation: Equatable {
     var available: Bool
     var health: HarnessHealth
     var summary: String
+    /// Install truth — WHICH cli the daemon actually probed, and where. Hoisted
+    /// out of `rows` because "is the binary here" and "is it signed in" are
+    /// different questions, and as two anonymous entries in one list a user
+    /// could not tell them apart: a correctly-installed, merely-unauthenticated
+    /// cli rendered as the same red "Unavailable" as a cli that was never there.
+    var install: InstallFacts?
+    /// Server-authored, human-readable blockers that already spell out the fix
+    /// ("run `claudexor auth login claude`"). These reached the user ONLY
+    /// through the "copy raw" clipboard, so the one sentence that says what to
+    /// do next was the one thing the card never showed.
+    var reasons: [String]
     var rows: [ReadinessCheck]
     /// The un-normalized evidence (reasons + raw probe ids) for "copy raw".
     var rawEvidence: String
@@ -124,24 +135,55 @@ struct HarnessReadinessPresentation: Equatable {
         // stored_key IS the primary credential, so a failure there is real and must
         // stay red — pass no fallback source so the rewrite never fires.
         let apiKeyIsFallback = family.defaultAuthReadinessRequest?.authRequest == .subscription
-        let rows = neutralizeAbsentOptionalKey(
+        let allRows = neutralizeAbsentOptionalKey(
             dedupeChecks(info?.readiness ?? []),
             authSources: info?.authSources ?? [],
             apiKeyFallbackSource: apiKeyIsFallback ? family.apiKeyAuthReadinessRequest?.source : nil)
+        // Install truth is the ONE typed `binary` row — the daemon normalizes
+        // which probe answers "is the cli here", so the card switches on `kind`
+        // and never on an id substring. A `fail` is the "not found on PATH"
+        // verdict, not an install (and its detail is not a version at all). A
+        // legacy daemon that ships no binary row still discloses the version in
+        // its manifest, so present that as the same install fact.
+        let binaryRow = allRows.first { $0.kind == "binary" }
+        let install: InstallFacts? = {
+            if let binaryRow {
+                return binaryRow.status == "pass"
+                    ? InstallFacts.parse(binaryRow.detail)
+                    : nil
+            }
+            return InstallFacts.parse(manifestVersion(info?.version))
+        }()
+        // Hoist the binary row ONLY when it was actually consumed as install
+        // truth, so no probe is ever dropped from the rendered list.
+        let rows = install == nil ? allRows : allRows.filter { $0.kind != "binary" }
         let reasons = dedupeOrdered(info?.reasons ?? [])
         return HarnessReadinessPresentation(
             family: family,
             available: !(info?.routableIntents.isEmpty ?? true),
             health: info?.health ?? .unavailable,
             summary: info?.auth ?? "Harness Doctor has not loaded this harness.",
+            install: install,
+            reasons: reasons,
             rows: rows,
+            // Evidence stays LOSSLESS: it is built from every row, including the
+            // binary row hoisted out of `rows` above, so a bug report still
+            // carries the resolved cli version and path.
             rawEvidence: (
                 reasons
-                    + rows.map { row in
+                    + allRows.map { row in
                         "\(row.id): \(row.status)\(row.detail.map { " — \($0)" } ?? "")"
                     }
             ).joined(separator: "\n")
         )
+    }
+
+    /// `mapHarnessStatuses` substitutes this literal when a harness discloses no
+    /// version (an api-key harness has no cli). It is an ABSENCE marker, not a
+    /// version — so it must never reach the screen as one.
+    private static func manifestVersion(_ version: String?) -> String? {
+        guard let version, version != "unknown" else { return nil }
+        return version
     }
 
     /// QA-005: an ABSENT OPTIONAL API-key fallback must read neutral, never a red
@@ -193,6 +235,47 @@ struct HarnessReadinessPresentation: Equatable {
     }
 }
 
+/// Install truth, split into the two facts a user actually needs: the cli
+/// VERSION (short — it is the headline) and the resolved absolute PATH (long —
+/// it truncates from the head so the binary name always survives, with the full
+/// path in `.help`).
+///
+/// The daemon ships both as one binary-kind detail string,
+/// "2.1.281 (Claude Code) at /Users/…/.claudexor/node/bin/claude". The split
+/// only accepts a separator whose RIGHT side actually looks like a path
+/// (absolute, `~`, or `$VAR`), so a version that merely CONTAINS the words —
+/// "codex at home 0.154.0" — is never carved in half.
+struct InstallFacts: Equatable {
+    var version: String
+    var path: String?
+
+    static func parse(_ detail: String?) -> InstallFacts? {
+        guard let detail else { return nil }
+        let text = AlignedRowText.singleLine(detail)
+        guard !text.isEmpty else { return nil }
+        // Collect every " at " boundary forward (the reliable `range(of:)`), then
+        // try them from the END so the LAST split that looks like a path wins.
+        var boundaries: [Range<String.Index>] = []
+        var cursor = text.startIndex
+        while cursor < text.endIndex,
+              let hit = text.range(of: " at ", range: cursor..<text.endIndex) {
+            boundaries.append(hit)
+            cursor = hit.upperBound
+        }
+        for separator in boundaries.reversed() {
+            let version = String(text[text.startIndex..<separator.lowerBound])
+            let path = String(text[separator.upperBound...])
+            guard !version.isEmpty, pathStartsLikeAPath(path) else { continue }
+            return InstallFacts(version: version, path: path)
+        }
+        return InstallFacts(version: text, path: nil)
+    }
+
+    private static func pathStartsLikeAPath(_ candidate: String) -> Bool {
+        candidate.hasPrefix("/") || candidate.hasPrefix("~") || candidate.hasPrefix("$")
+    }
+}
+
 /// The shared card (W4.7-UI): identity + health + the typed check rows +
 /// model verdict + "copy raw", with the CALLER's action row slotted in.
 /// Fixed geometry: the health capsule and row glyph columns have fixed
@@ -219,6 +302,26 @@ struct HarnessReadinessCard<Actions: View>: View {
                     .frame(minWidth: 96) // fixed anchor — text length never moves the row
                     .background(presentation.health.color.opacity(0.14), in: Capsule())
             }
+            if let install = presentation.install {
+                // Install is its OWN row, not another entry in the auth list: it
+                // is the answer to "did you find my cli?", which is the first
+                // question and the one the generic health capsule never answered.
+                AlignedList(verticalSpacing: Theme.Spacing.xxs) {
+                    AlignedListRow(identity: AlignedRowIdentity(
+                        dotColor: Theme.status(.positive),
+                        dotSystemImage: "checkmark.circle.fill",
+                        dotHelp: "Installed",
+                        title: install.version,
+                        titleFont: .caption,
+                        details: install.path.map {
+                            // Head-truncated: the binary name is the informative
+                            // end, `/Users/someone/…` is not.
+                            [AlignedRowDetail(0, $0, truncation: .head)]
+                        } ?? []
+                    )) { EmptyView() }
+                    .help(install.path.map { "\(install.version)\n\($0)" } ?? install.version)
+                }
+            }
             if !presentation.rows.isEmpty {
                 // Ported to the shared AlignedListRow component (UI cut 3 §1):
                 // status glyph + check title + SINGLE-LINE detail (full text via
@@ -234,6 +337,27 @@ struct HarnessReadinessCard<Actions: View>: View {
                             details: (row.detail?.isEmpty == false)
                                 ? [AlignedRowDetail(0, row.detail!)] : []
                         )) { EmptyView() }
+                    }
+                }
+            }
+            if !presentation.reasons.isEmpty {
+                // The daemon's own remediation, finally on screen instead of
+                // only on the clipboard. Full sentences, so they read as prose
+                // rather than as another probe row (which is what made the
+                // actionable text unreadable when it was one of those).
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    Text("What to do")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.status(.caution))
+                    ForEach(Array(presentation.reasons.enumerated()), id: \.offset) { _, reason in
+                        Label {
+                            Text(reason).lineLimit(2)
+                        } icon: {
+                            Image(systemName: "arrow.turn.down.right")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help(reason)
                     }
                 }
             }

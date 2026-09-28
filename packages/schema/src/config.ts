@@ -449,10 +449,129 @@ export const GlobalConfig = z
       )
       .default({})
       .describe("Per-harness settings keyed by harness id."),
+    /**
+     * User-defined OpenAI-compatible providers. Each entry registers one raw-API
+     * harness (id `provider-<name>`) backed by any endpoint speaking the OpenAI
+     * chat-completions contract (OpenAI, OpenRouter, Together, LM Studio, ...).
+     * Credential material stays in the SecretStore (`secrets set <name>`),
+     * never in config — the row names the env/secret slot only.
+     */
+    providers: z
+      .array(
+        z
+          .object({
+            name: NonBlankString.regex(
+              /^[a-z0-9][a-z0-9-]*$/,
+              "provider name must be lowercase alphanumeric/hyphen (it becomes the provider-<name> harness id)",
+            ).describe("Short unique provider name."),
+            base_url: z
+              .string()
+              .url()
+              .describe("OpenAI-compatible base URL, e.g. https://openrouter.ai/api/v1."),
+            key_env: NonBlankString.describe(
+              "Env var (or SecretStore slot) holding this provider's API key.",
+            ),
+            default_model: z
+              .string()
+              .nullable()
+              .default(null)
+              .describe("Default model for this provider; null = provider endpoint default."),
+            usage_cost_unit: z
+              .enum(["usd"])
+              .nullable()
+              .default(null)
+              .describe(
+                "Trust the endpoint's provider-reported usage cost when it declares this unit; null = untrusted.",
+              ),
+          })
+          .strict(),
+      )
+      .default([])
+      .superRefine((providers, ctx) => {
+        const seen = new Set<string>();
+        const keyEnvs = new Map<string, string>();
+        for (const p of providers) {
+          if (seen.has(p.name))
+            ctx.addIssue({
+              code: "custom",
+              message: `duplicate provider name ${p.name}`,
+            });
+          seen.add(p.name);
+          const owner = keyEnvs.get(p.key_env);
+          if (owner && owner !== p.name)
+            ctx.addIssue({
+              code: "custom",
+              message: `key_env ${p.key_env} is shared by providers ${owner} and ${p.name}; each provider needs its own key slot`,
+            });
+          keyEnvs.set(p.key_env, p.name);
+        }
+      })
+      .describe(
+        "User-defined OpenAI-compatible providers; each registers a raw-API harness usable as an AI agent.",
+      ),
+    /**
+     * User-defined MCP servers injected into harness sandboxes on every run
+     * (alongside the delegation belt). Names share the delegation belt's
+     * namespace rules and may not collide with it.
+     */
+    mcp: z
+      .object({
+        servers: z
+          .array(
+            z
+              .object({
+                name: NonBlankString.regex(
+                  /^[a-z0-9_]+$/,
+                  "MCP server name must be lowercase alphanumeric/underscore (it becomes the mcp__<name>__* tool prefix)",
+                ).describe("Server key the harness exposes tools under (mcp__<name>__*)."),
+                command: z
+                  .string()
+                  .min(1)
+                  .describe("Executable for the MCP server process (resolved via PATH)."),
+                args: z.array(z.string()).default([]).describe("Argv for the MCP server process."),
+                env: z
+                  .record(z.string(), z.string())
+                  .default({})
+                  .describe("Extra environment variables for the MCP server process."),
+                required: z
+                  .boolean()
+                  .default(false)
+                  .describe("Whether the run fails when this server cannot initialize."),
+              })
+              .strict(),
+          )
+          .default([])
+          .superRefine((servers, ctx) => {
+            const seen = new Set<string>();
+            for (const s of servers) {
+              if (seen.has(s.name))
+                ctx.addIssue({ code: "custom", message: `duplicate MCP server name ${s.name}` });
+              seen.add(s.name);
+            }
+          })
+          .describe("MCP servers injected into every harness run's sandbox."),
+      })
+      .strict()
+      .default({})
+      .describe("User-defined MCP server integration."),
+    /**
+     * Skills directories surfaced to harness runs. Each directory holds one
+     * skill per subdirectory (`<skill>/SKILL.md`), the industry convention.
+     */
+    skills: z
+      .object({
+        directories: z
+          .array(z.string())
+          .default([])
+          .describe("Absolute or ~-prefixed directories holding <skill>/SKILL.md entries."),
+      })
+      .strict()
+      .default({})
+      .describe("Skills surfaced to harness runs."),
   })
   .strict()
   .describe(
-    "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, and per-harness settings.",
+    "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, MCP servers, and skills.",
   );
 export type GlobalConfig = z.infer<typeof GlobalConfig>;
 

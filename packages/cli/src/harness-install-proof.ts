@@ -61,6 +61,28 @@ function exactSemverTokens(value: string): string[] {
   return [...value.matchAll(SEMVER_TOKEN)].map((match) => match[1] ?? "");
 }
 
+/** Why a `--version` probe did not exit zero.
+ *
+ *  A null `status` means the child was TERMINATED — by the probe's own deadline,
+ *  or by a signal — not that it "exited strangely". The old wording reported
+ *  both as "exited without a status", which reads like a broken binary when the
+ *  install is usually fine: a vendor launcher that prints its version and then
+ *  lingers past the deadline gets killed mid-exit, and the operator is told the
+ *  install failed. Name the actual cause so the remedy is obvious. */
+function versionProbeFailureReason(result: {
+  status: number | null;
+  signal?: NodeJS.Signals | null;
+  error?: NodeJS.ErrnoException;
+}): string {
+  if (result.error?.code === "ETIMEDOUT") {
+    return `the absolute --version probe timed out after ${VERSION_PROBE_TIMEOUT_MS}ms (the installed binary did not exit before the deadline)`;
+  }
+  if (result.signal) {
+    return `the absolute --version probe was terminated by ${result.signal}`;
+  }
+  return `the absolute --version probe exited ${result.status}`;
+}
+
 function proveVersion(
   installedBinary: string,
   runtime: InstallProofRuntime,
@@ -75,10 +97,7 @@ function proveVersion(
     maxBuffer: VERSION_PROBE_MAX_BYTES,
   });
   if (versionResult.status !== 0) {
-    return {
-      ok: false,
-      reason: `the absolute --version probe exited ${versionResult.status ?? "without a status"}`,
-    };
+    return { ok: false, reason: versionProbeFailureReason(versionResult) };
   }
   const versionOutput = outputText(versionResult.stdout).trim();
   if (versionOutput.length === 0) {

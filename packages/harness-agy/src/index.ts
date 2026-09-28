@@ -15,6 +15,7 @@ import {
 } from "@claudexor/schema";
 import type { DoctorSpec, HarnessAdapter } from "@claudexor/core";
 import {
+  brokenInstallAdvisory,
   HarnessUnavailableError,
   harnessPlatform,
   needsPrivatePerProfileKeychain,
@@ -223,8 +224,11 @@ export function createAgyAdapter(options: AgyAdapterOptions = {}): HarnessAdapte
     async discover(): Promise<HarnessManifest> {
       const version = await detectVersion();
       if (version === null) {
+        const advisory = brokenInstallAdvisory(AGY_BIN());
         throw new HarnessUnavailableError(
-          "agy not found on PATH (install Antigravity CLI or set CLAUDEXOR_AGY_BIN)",
+          `agy not found on PATH (install Antigravity CLI or set CLAUDEXOR_AGY_BIN)${
+            advisory ? ` — ${advisory}` : ""
+          }`,
         );
       }
       return HarnessManifestSchema.parse({
@@ -277,6 +281,10 @@ export function createAgyAdapter(options: AgyAdapterOptions = {}): HarnessAdapte
       // a different effective policy altogether: the vendor credential is
       // OS-user-scoped and HOME scopes state only.
       const platformProof = agyPlatformIsolationDetail();
+      // Once per doctor call, shared by both missing-CLI reports: when the
+      // filesystem still holds evidence of a broken install, name the repair
+      // instead of dead-ending at "not found" (same contract as Codex).
+      const missingInstall = version === null ? brokenInstallAdvisory(AGY_BIN()) : null;
       const requestedSource = spec.authSource;
       if (requestedSource !== undefined && requestedSource !== "native_session") {
         return ConformanceReportSchema.parse({
@@ -284,7 +292,11 @@ export function createAgyAdapter(options: AgyAdapterOptions = {}): HarnessAdapte
           status: "unavailable",
           checks: [
             version === null
-              ? { id: "installed", status: "fail", detail: "agy not found" }
+              ? {
+                  id: "installed",
+                  status: "fail",
+                  detail: missingInstall ? `agy not found — ${missingInstall}` : "agy not found",
+                }
               : { id: "installed", status: "pass", detail: redactSecrets(version) },
             {
               id: "auth_source",
@@ -309,10 +321,19 @@ export function createAgyAdapter(options: AgyAdapterOptions = {}): HarnessAdapte
         return ConformanceReportSchema.parse({
           harness_id: "agy",
           status: "unavailable",
-          checks: [{ id: "installed", status: "fail", detail: "agy not found" }],
+          checks: [
+            {
+              id: "installed",
+              status: "fail",
+              detail: missingInstall ? `agy not found — ${missingInstall}` : "agy not found",
+            },
+          ],
           enabled_intents: [],
           disabled_intents: AGY_ENABLED_INTENTS,
-          reasons: ["agy not found (install Antigravity CLI or set CLAUDEXOR_AGY_BIN)"],
+          reasons: [
+            "agy not found (install Antigravity CLI or set CLAUDEXOR_AGY_BIN)",
+            ...(missingInstall ? [missingInstall] : []),
+          ],
           auth_sources: [
             {
               source: "native_session",

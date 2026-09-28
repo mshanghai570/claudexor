@@ -159,4 +159,165 @@ import Testing
         // rawEvidence carries one reason + one row line, not the duplicates.
         #expect(presentation.rawEvidence == "dup\nauth: pass")
     }
+
+    // MARK: - Install truth: the "did you find my CLI?" fact gets its own row
+
+    private func installedInfo(
+        version: String = "2.1.281 (Claude Code)",
+        path: String = "/Users/someone/.claudexor/node/bin/claude"
+    ) -> HarnessInfo {
+        var info = HarnessInfo(family: .claude, health: .unavailable, version: version,
+                               auth: "Not ready: unavailable.", intents: [])
+        info.readiness = [
+            ReadinessCheck(kind: "binary", id: "installed", title: "Installed", status: "pass",
+                           detail: "\(version) at \(path)"),
+            ReadinessCheck(kind: "probe", id: "native_session", title: "Native session",
+                           status: "fail", detail: "not logged in"),
+        ]
+        return info
+    }
+
+    @Test func installFactIsSplitFromTheBinaryRow() {
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: installedInfo())
+        #expect(presentation.install?.version == "2.1.281 (Claude Code)")
+        #expect(presentation.install?.path == "/Users/someone/.claudexor/node/bin/claude")
+    }
+
+    @Test func binaryRowIsHoistedOutOfTheCheckRows() {
+        // Install is its own fact; it must not ALSO appear as an anonymous entry
+        // in the auth list, or the card shows the same probe twice.
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: installedInfo())
+        #expect(presentation.rows.map(\.id) == ["native_session"])
+        #expect(!presentation.rows.contains { $0.id == "installed" })
+    }
+
+    @Test func hoistingTheBinaryRowKeepsCopyRawEvidenceLossless() {
+        // A bug report must still carry the resolved cli version and path even
+        // though the row no longer renders in the list.
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: installedInfo())
+        #expect(presentation.rawEvidence.contains("installed: pass — 2.1.281 (Claude Code) at "))
+    }
+
+    @Test func installedCLIIsVisibleWhileStillUnauthenticated() {
+        // The regression this fixes: claude IS installed and the daemon proved
+        // it, yet health was `unavailable` (not logged in) — so the card showed
+        // only a red capsule and the user concluded the CLI was not recognized.
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: installedInfo())
+        #expect(presentation.health == .unavailable)
+        #expect(presentation.install != nil)
+        #expect(presentation.available == false)
+    }
+
+    @Test func installFallsBackToTheManifestVersionWhenNoBinaryRowIsShipped() {
+        // Legacy daemon: no typed `binary` row at all, but the manifest still
+        // discloses the cli version. The fact must not silently disappear.
+        var info = HarnessInfo(family: .claude, health: .ok, version: "codex-cli 0.154.0",
+                               auth: "ok", intents: ["implement"])
+        info.readiness = [
+            ReadinessCheck(kind: "probe", id: "native_session", title: "Native session", status: "pass"),
+        ]
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: info)
+        #expect(presentation.install?.version == "codex-cli 0.154.0")
+        #expect(presentation.install?.path == nil)
+        // Nothing to hoist: the row list is untouched.
+        #expect(presentation.rows.map(\.id) == ["native_session"])
+    }
+
+    @Test func absentInstallIsNilRatherThanTheWordUnknown() {
+        // `mapHarnessStatuses` substitutes "unknown" when a harness discloses no
+        // version (an api-key harness has no cli). That is an ABSENCE marker and
+        // must never reach the screen as if it were a version.
+        var info = HarnessInfo(family: .raw, health: .unavailable, version: "unknown",
+                               auth: "no key", intents: [])
+        info.readiness = [
+            ReadinessCheck(kind: "auth", id: "api_key", title: "API key", status: "fail",
+                           detail: "OPENAI_API_KEY not set"),
+        ]
+        let presentation = HarnessReadinessPresentation.from(family: .raw, info: info)
+        #expect(presentation.install == nil)
+    }
+
+    @Test func everyHarnessNeverLoadedIsNotPresentedAsInstalled() {
+        // Before the first doctor load there is no manifest and no rows at all.
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: nil)
+        #expect(presentation.install == nil)
+        #expect(presentation.rows.isEmpty)
+        #expect(presentation.reasons.isEmpty)
+    }
+
+    @Test func missingCLIIsNotPresentedAsInstalled() {
+        // A failed `binary` row is a real "not found on PATH" verdict, and its
+        // detail ("agy not found") is not a version. It must neither claim an
+        // install nor vanish from the list.
+        var info = HarnessInfo(family: .agy, health: .unavailable, version: "unknown",
+                               auth: "agy not found", intents: [])
+        info.readiness = [
+            ReadinessCheck(kind: "binary", id: "installed", title: "Installed", status: "fail",
+                           detail: "agy not found"),
+        ]
+        let presentation = HarnessReadinessPresentation.from(family: .agy, info: info)
+        #expect(presentation.install == nil)
+        #expect(presentation.rows.map(\.id) == ["installed"])
+    }
+
+    // MARK: - The daemon's remediation must be ON SCREEN, not only on the clipboard
+
+    @Test func reasonsAreCarriedForRendering() {
+        var info = HarnessInfo(family: .claude, health: .unavailable, version: "1",
+                               auth: "Not ready: unavailable.", intents: [])
+        info.reasons = [
+            "not authenticated: open Accounts → Claude → Login, then complete Native setup",
+        ]
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: info)
+        #expect(presentation.reasons.count == 1)
+        #expect(presentation.reasons[0].contains("open Accounts"))
+    }
+
+    @Test func reasonsStayDeduplicatedAndReachCopyRaw() {
+        var info = HarnessInfo(family: .claude, health: .unavailable, version: "1",
+                               auth: "x", intents: [])
+        info.reasons = ["same", "same", "other"]
+        let presentation = HarnessReadinessPresentation.from(family: .claude, info: info)
+        #expect(presentation.reasons == ["same", "other"])
+        // Reasons lead the evidence, in order, exactly once each — with no
+        // trailing separator invented when there are no check rows to follow.
+        #expect(presentation.rawEvidence == "same\nother")
+    }
+
+    // MARK: - InstallFacts parsing
+
+    @Test func installFactsSplitOnTheLastAtSeparator() {
+        let facts = InstallFacts.parse("2.1.281 (Claude Code) at /Users/someone/.local/bin/claude")
+        #expect(facts?.version == "2.1.281 (Claude Code)")
+        #expect(facts?.path == "/Users/someone/.local/bin/claude")
+    }
+
+    @Test func installFactsOnlySplitOnAPathLookingRightHandSide() {
+        // A version-only detail (cursor's "2026.09.26-dd393fe") has no " at ".
+        // And a version that merely CONTAINS the words must not be carved in
+        // half: only a right-hand side that looks like a path is a separator.
+        #expect(InstallFacts.parse("2026.09.26-dd393fe")?.version == "2026.09.26-dd393fe")
+        #expect(InstallFacts.parse("2026.09.26-dd393fe")?.path == nil)
+        let facts = InstallFacts.parse("codex at home 0.154.0")
+        #expect(facts?.version == "codex at home 0.154.0")
+        #expect(facts?.path == nil)
+    }
+
+    @Test func installFactsAcceptTildeAndVariablePaths() {
+        #expect(InstallFacts.parse("1.0 at ~/.local/bin/claude")?.path == "~/.local/bin/claude")
+        #expect(InstallFacts.parse("1.0 at $HOME/bin/claude")?.path == "$HOME/bin/claude")
+    }
+
+    @Test func installFactsUseTheLastPathLookingSeparator() {
+        // "weird at /old at /new/bin/tool" — the real path is the LAST one.
+        let facts = InstallFacts.parse("weird at /old at /new/bin/tool")
+        #expect(facts?.version == "weird at /old")
+        #expect(facts?.path == "/new/bin/tool")
+    }
+
+    @Test func installFactsNormalizeWhitespaceAndRejectEmpty() {
+        #expect(InstallFacts.parse("  2.1.281\nat\t/bin/claude  ")?.path == "/bin/claude")
+        #expect(InstallFacts.parse(nil) == nil)
+        #expect(InstallFacts.parse("   ") == nil)
+    }
 }

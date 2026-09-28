@@ -94,6 +94,55 @@ cd apps/macos/ClaudexorKit && swift test
 cd ../ClaudexorApp && swift test && swift build
 ```
 
+### Intel (x86_64) macOS
+
+The CLI and daemon are architecture-independent: `pnpm build` compiles the same
+TypeScript bundles on Intel and Apple Silicon, and the only native Darwin binary
+they ship — the `claudexor-process-identity` helper — is built fat
+(`-arch arm64 -arch x86_64`), so a single install runs on both. Nothing in the
+CLI, daemon, or npm package branches on `process.arch` for Darwin, and the
+released SSH runtime archives already include `darwin-x64`. On an Intel Mac the
+ordinary commands are the whole Intel path:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build            # tsc bundles + universal Darwin helper
+pnpm typecheck
+node packages/cli/dist/cli.js doctor
+```
+
+The **native app** also runs on Intel: its floor is macOS 15
+(`apps/macos/ClaudexorApp/Package.swift`, `LSMinimumSystemVersion 15.0`), not the
+macOS 26 the Liquid Glass chrome assumes. macOS 26 gets first-class Liquid Glass;
+below it every glass surface falls back to the SOLID chrome recipe the design
+system already specifies for Reduce Transparency (one gate —
+`LiquidGlassChrome` — not scattered `#available` checks). Build and run it
+natively on the Intel Mac you are targeting:
+
+```bash
+cd apps/macos/ClaudexorApp && swift build -c release && swift run ClaudexorApp
+apps/macos/scripts/build-app.sh          # unsigned self-contained .app + ZIP
+```
+
+`build-app.sh` builds for the HOST architecture, so on an Intel Mac it produces an
+x86_64 `.app` and on an Apple Silicon Mac an arm64 one (the release lane builds on
+an arm64 runner). It is not yet wired to emit a single universal arm64+x86_64
+bundle; building on the target Mac is the supported path today. The Swift
+toolchain bundled with Xcode 26 can be older than the 6.3+ this repo recommends —
+use Swiftly (`~/.swiftly/bin`) for `swift test`/`swift build`.
+
+CI covers this path: the required `macos-intel` lane runs on GitHub's
+`macos-15-intel` image (the last x86_64 macOS runner, available only through
+August 2027), where it builds, typechecks, verifies the Darwin npm package, and
+runs the architecture-sensitive suites (`process-identity`, `runtime-env`,
+`process-tree`, `platform-auth-policy`) natively on x86_64 — then asserts the
+helper still carries both `lipo` slices. It also selects the image's Xcode 26
+(its default, Xcode 16.4, cannot parse `swift-tools-version:6.2`), builds the app
+for x86_64, and proves the artifact is an x86_64 binary with a macOS 15.0
+minimum — the only place the non-glass path is compiled against a real Intel
+toolchain. `scripts/release-workflow-check.mjs` fails if that lane, its runner
+image, its app build, or its `build-test` dependency disappears.
+
 Release verification is wrapped by:
 
 ```bash
