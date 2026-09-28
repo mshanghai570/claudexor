@@ -513,10 +513,151 @@
           },
           "default": {},
           "description": "Per-harness settings keyed by harness id."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "allOf": [
+                  {
+                    "pattern": "\\S"
+                  },
+                  {
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  }
+                ],
+                "description": "Short unique provider name."
+              },
+              "base_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "OpenAI-compatible base URL, e.g. https://openrouter.ai/api/v1."
+              },
+              "key_env": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S",
+                "description": "Env var (or SecretStore slot) holding this provider's API key."
+              },
+              "default_model": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null,
+                "description": "Default model for this provider; null = provider endpoint default."
+              },
+              "usage_cost_unit": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "usd"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Trust the endpoint's provider-reported usage cost when it declares this unit; null = untrusted."
+              }
+            },
+            "required": [
+              "name",
+              "base_url",
+              "key_env"
+            ],
+            "additionalProperties": false
+          },
+          "default": [],
+          "description": "User-defined OpenAI-compatible providers; each registers a raw-API harness usable as an AI agent."
+        },
+        "mcp": {
+          "type": "object",
+          "properties": {
+            "servers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "allOf": [
+                      {
+                        "pattern": "\\S"
+                      },
+                      {
+                        "pattern": "^[a-z0-9_]+$"
+                      }
+                    ],
+                    "description": "Server key the harness exposes tools under (mcp__<name>__*)."
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Executable for the MCP server process (resolved via PATH)."
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "Argv for the MCP server process."
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "default": {},
+                    "description": "Extra environment variables for the MCP server process."
+                  },
+                  "required": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Whether the run fails when this server cannot initialize."
+                  }
+                },
+                "required": [
+                  "name",
+                  "command"
+                ],
+                "additionalProperties": false
+              },
+              "default": [],
+              "description": "MCP servers injected into every harness run's sandbox."
+            }
+          },
+          "additionalProperties": false,
+          "default": {},
+          "description": "User-defined MCP server integration."
+        },
+        "skills": {
+          "type": "object",
+          "properties": {
+            "directories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "Absolute or ~-prefixed directories holding <skill>/SKILL.md entries."
+            }
+          },
+          "additionalProperties": false,
+          "default": {},
+          "description": "Skills surfaced to harness runs."
         }
       },
       "additionalProperties": false,
-      "description": "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, and per-harness settings."
+      "description": "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, MCP servers, and skills."
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#"

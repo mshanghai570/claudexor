@@ -24,8 +24,11 @@
     <string>__CLAUDEXOR_BUILD__</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <!-- macOS 15 floor: the app runs on Intel Macs, which macOS 26 never reaches.
+         Liquid Glass remains the chrome on macOS 26; older systems get the solid
+         chrome recipe (docs/DESIGN_SYSTEM.md §3.1). -->
     <key>LSMinimumSystemVersion</key>
-    <string>26.0</string>
+    <string>15.0</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
     <key>NSHighResolutionCapable</key>

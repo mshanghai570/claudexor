@@ -19,11 +19,31 @@ extension SettingsScreen {
         .background(Theme.surfaceBase)
     }
 
+    /// The active location's human name, used to qualify the local-only facts
+    /// below so a remote-scoped pane never presents This Mac's engine as the
+    /// one being edited.
+    var activeLocationLabel: String {
+        guard let id = model.activeExecutionLocation.remoteConnectionID,
+              let connection = model.remoteConnections.first(where: { $0.id == id })
+        else { return "the selected remote host" }
+        return connection.displayName
+    }
+
+    private var isEditingLocalLocation: Bool {
+        model.activeExecutionLocation == .local
+    }
+
     @ViewBuilder var generalGroup: some View {
         @Bindable var model = model
         settingsGroup("General", "gearshape") {
+            // This row is the LOCAL daemon's health, and every other control on
+            // this pane is scoped to the ACTIVE execution location. Leaving that
+            // unqualified made a healthy remote host read as a dead engine (and
+            // the reverse) — the same class of lie as a wrong status capsule.
             KeyValueRow(
-                key: "Engine status",
+                key: isEditingLocalLocation
+                    ? "Engine status (This Mac)"
+                    : "Engine status (This Mac — not \(activeLocationLabel))",
                 value: model.health.label,
                 valueColor: model.health == .connected
                     ? Theme.status(.positive)
@@ -59,7 +79,7 @@ extension SettingsScreen {
                 }
             }
             .pickerStyle(.segmented)
-            Text("The window is matte glass — the desktop shows faintly through it. Code and diffs stay on a solid surface for contrast. Reduce Transparency falls back to a solid backdrop.")
+            Text(AppearanceChromeCopy.backdropText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -171,8 +191,13 @@ extension SettingsScreen {
                         .buttonStyle(.bordered).controlSize(.small)
                 }
             }
+            // Same qualification as General: `endpoint` is the LOCAL daemon's.
+            // A remote-scoped pane that showed This Mac's loopback URL as "the
+            // Control API" pointed the reader at the wrong machine.
             KeyValueRow(
-                key: "Control API",
+                key: isEditingLocalLocation
+                    ? "Control API"
+                    : "Control API (This Mac)",
                 value: model.endpoint.isEmpty ? "—" : "http://\(model.endpoint)",
                 mono: true
             )

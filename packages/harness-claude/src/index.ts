@@ -23,6 +23,7 @@ import {
 import type { DoctorSpec, HarnessAdapter, InteractionChannel } from "@claudexor/core";
 import {
   abortSignalFromSpec,
+  brokenInstallAdvisory,
   HarnessUnavailableError,
   interactionChannelFromSpec,
   needsScopedHomeKeychainBridge,
@@ -46,6 +47,7 @@ import {
 } from "./capability-profile.js";
 export { CLAUDE_MANAGED_LOGIN, claudeQuotaModelAliases } from "./capability-profile.js";
 import { claudeNativeLoginRemedy } from "./doctor-remedy.js";
+import { claudeSkillsPluginForSpec } from "./skills-plugin.js";
 import { claudeNativeHomeEnv, defaultNativeClaudeConfigDir } from "./native-home.js";
 export { claudeAccountIdentity, defaultNativeClaudeConfigDir } from "./native-home.js";
 import { createClaudeParser } from "./parse.js";
@@ -255,6 +257,11 @@ export type ClaudeProfileRuntimeDeps = Pick<
 
 type ClaudeRuntimeDeps = {
   detectVersion: typeof detectClaudeVersion;
+  /** Explains a missing binary when the filesystem still holds evidence of
+   * an install (dangling symlink, stripped exec bit, a Homebrew dir still
+   * listing the cask). Diagnostic only — surfaced in doctor/discover so the
+   * dead end names the repair instead of just "not found". */
+  brokenInstallAdvisory: typeof brokenInstallAdvisory;
   probeAuthStatus: typeof probeAuthStatus;
   anthropicApiKey: typeof anthropicApiKey;
   claudeOAuthToken: typeof claudeOAuthToken;
@@ -274,6 +281,7 @@ type ClaudeRuntimeDeps = {
 export function createClaudeAdapter(deps: Partial<ClaudeRuntimeDeps> = {}): HarnessAdapter {
   const runtime: ClaudeRuntimeDeps = {
     detectVersion: detectClaudeVersion,
+    brokenInstallAdvisory,
     probeAuthStatus,
     anthropicApiKey,
     claudeOAuthToken,
@@ -297,8 +305,11 @@ export function createClaudeAdapter(deps: Partial<ClaudeRuntimeDeps> = {}): Harn
     async discover(): Promise<HarnessManifest> {
       const version = await runtime.detectVersion();
       if (version === null) {
+        const advisory = runtime.brokenInstallAdvisory(BIN);
         throw new HarnessUnavailableError(
-          "claude CLI not found on PATH (set CLAUDEXOR_CLAUDE_BIN to override)",
+          `claude CLI not found on PATH (set CLAUDEXOR_CLAUDE_BIN to override)${
+            advisory ? ` — ${advisory}` : ""
+          }`,
         );
       }
       const apiKey = runtime.anthropicApiKey() !== null;
@@ -389,11 +400,23 @@ export function createClaudeAdapter(deps: Partial<ClaudeRuntimeDeps> = {}): Harn
     async doctor(_spec: DoctorSpec): Promise<ConformanceReport> {
       const version = await runtime.detectVersion(_spec.abortSignal);
       if (version === null) {
+        const advisory = runtime.brokenInstallAdvisory(BIN);
         return ConformanceReportSchema.parse({
           harness_id: "claude",
           status: "unavailable",
-          checks: [{ id: "installed", status: "fail", detail: "claude not found on PATH" }],
-          reasons: ["claude CLI not found (install Claude Code or set CLAUDEXOR_CLAUDE_BIN)"],
+          checks: [
+            {
+              id: "installed",
+              status: "fail",
+              detail: advisory
+                ? `claude not found on PATH — ${advisory}`
+                : "claude not found on PATH",
+            },
+          ],
+          reasons: [
+            "claude CLI not found (install Claude Code or set CLAUDEXOR_CLAUDE_BIN)",
+            ...(advisory ? [advisory] : []),
+          ],
         });
       }
       const readonlyProfile = await runtime.probeReadonlyProfile(_spec.abortSignal);
@@ -640,6 +663,8 @@ export function claudeArgsForSpec(
   /** What the installed CLI advertises; the recorded snapshot by default so
    * arg-shape callers stay synchronous and the probe stays optional. */
   advertisedEfforts: readonly EffortHint[] = CLAUDE_EFFORT_SNAPSHOT,
+  /** Materialized skills plugin (see skills-plugin.ts); null = no skills flag. */
+  skillsPluginDir: string | null = null,
 ): string[] {
   // Interactive sessions deliver the prompt as a stream-json user message on
   // stdin (the control protocol's transport); one-shot runs keep the prompt arg.
@@ -694,6 +719,10 @@ export function claudeArgsForSpec(
   }
   // Resume a native Claude session as a follow-up turn of the same conversation.
   if (spec.resume_session_id) args.push("--resume", spec.resume_session_id);
+  // Engine-resolved Agent Skills, delivered as a plugin directory the child
+  // loads for this invocation only. Omitted on lanes that disable skills
+  // (readonly passes --disable-slash-commands); the caller decides.
+  if (skillsPluginDir) args.push("--plugin-dir", skillsPluginDir);
   args.push(...claudeMcpArgs(spec));
   args.push(...toolPermissionArgs(spec));
   // `--bare` disables OAuth/keychain auth, so it is mutually exclusive with the
@@ -911,7 +940,16 @@ async function* runClaude(
   const effort = await claudeRunEffortResolution(spec, runtime, abortSignalFromSpec(spec));
   spec = applyClaudeRunProcessing(spec, nativeEnv.CLAUDE_CONFIG_DIR, useSubscription);
   const processing = spec.processing;
-  const args = claudeArgsForSpec(spec, interactive, useSubscription, effort.advertised);
+  // Skills are OFF on the readonly lane by policy (--disable-slash-commands);
+  // claudeSkillsPluginForSpec owns that decision and says so out loud.
+  const skillsPluginDir = claudeSkillsPluginForSpec(spec).pluginDir;
+  const args = claudeArgsForSpec(
+    spec,
+    interactive,
+    useSubscription,
+    effort.advertised,
+    skillsPluginDir,
+  );
   if (effort.disclosure) yield effort.disclosure;
   // Scrub all provider secrets, then re-add only this route's credential.
   const env: Record<string, string | null | undefined> =

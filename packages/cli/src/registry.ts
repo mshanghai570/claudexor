@@ -18,6 +18,7 @@ import { createCursorAdapter } from "@claudexor/harness-cursor";
 import { FAKE_KINDS, createFakeHarness } from "@claudexor/harness-fake";
 import { createOpenCodeAdapter } from "@claudexor/harness-opencode";
 import { createRawApiAdapter } from "@claudexor/harness-raw-api";
+import { loadConfig } from "@claudexor/config";
 import {
   catalogProfiles,
   enumerateAccountCatalogs,
@@ -35,6 +36,40 @@ export interface RegistryOptions {
  * registered for explicit `--harness`. An `openrouter` raw-API instance is the
  * direct-API path for explicitly requested auxiliary models when its key exists.
  */
+/**
+ * Spawn one raw-API adapter per user-defined OpenAI-compatible provider row in
+ * the global config (config-driven, no source edits). A provider whose config
+ * fails to parse is skipped with a stderr warning — registry construction must
+ * never throw on bad user data; the daemon's doctor surface reports it.
+ */
+function providerAdapters(): HarnessAdapter[] {
+  let providers: Array<{
+    name: string;
+    base_url: string;
+    key_env: string;
+    default_model: string | null;
+    usage_cost_unit: "usd" | null;
+  }> = [];
+  try {
+    providers = loadConfig(process.cwd()).global.providers ?? [];
+  } catch (err) {
+    console.error(
+      `[claudexor] providers config unavailable (${err instanceof Error ? err.message : String(err)}); configured providers are disabled`,
+    );
+    return [];
+  }
+  return providers.map((p) =>
+    createRawApiAdapter({
+      id: `provider-${p.name}`,
+      providerFamily: "unknown",
+      providerUsageCostUnit: p.usage_cost_unit ?? undefined,
+      baseUrl: p.base_url,
+      keyEnv: p.key_env,
+      defaultModel: p.default_model ?? undefined,
+    }),
+  );
+}
+
 export function buildRegistry(opts: RegistryOptions = {}): AdapterRegistry {
   const registry: AdapterRegistry = new Map();
   for (const adapter of [
@@ -52,6 +87,7 @@ export function buildRegistry(opts: RegistryOptions = {}): AdapterRegistry {
       keyEnv: "OPENROUTER_API_KEY",
       defaultModel: process.env.CLAUDEXOR_OPENROUTER_MODEL ?? "openai/gpt-5.5",
     }),
+    ...providerAdapters(),
   ]) {
     registry.set(adapter.id, adapter);
   }

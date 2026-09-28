@@ -74,13 +74,55 @@ if [ -d "$HOME/.claudexor/node/bin" ]; then
 fi
 
 echo "==> Building release binary (Swift)"
+# Target architecture: CLAUDEXOR_ARCH=host (default) builds for this Mac's
+# native slice; x86_64 and arm64 cross-build (or natively build) that slice;
+# universal emits a fat arm64+x86_64 binary. Artifacts are named with an
+# arch tag so an Intel DMG and an Apple Silicon DMG never collide:
+#   Claudexor-<version>[-unsigned]-macos-x64.dmg / -macos-arm64 / -macos-universal
+# (arm64 builds on arm64 hosts keep the historical untagged names for
+# release-lane compatibility; only cross/non-host builds get the -macos-<arch>
+# suffix.)
+ARCH="${CLAUDEXOR_ARCH:-host}"
+case "$ARCH" in
+  host)
+    HOST_ARCH="$(uname -m)"
+    case "$HOST_ARCH" in
+      x86_64) ARCH_TAG="x64" ;;
+      arm64)  ARCH_TAG="" ;;   # native arm64 keeps the untagged artifact names
+      *) echo "ERROR: unsupported host arch $HOST_ARCH" >&2; exit 1 ;;
+    esac
+    ;;
+  x86_64|arm64)
+    ARCH_TAG="$([ "$ARCH" = x86_64 ] && echo x64 || echo arm64)"
+    ;;
+  universal)
+    ARCH_TAG="universal"
+    ;;
+  *) echo "ERROR: CLAUDEXOR_ARCH must be host, x86_64, arm64, or universal (got $ARCH)" >&2; exit 1 ;;
+esac
+
 SWIFT_BUILD_ARGS=(-c release)
 if [ "$DEV_REMOTE_RUNTIME" = "1" ]; then
   SWIFT_BUILD_ARGS+=(-Xswiftc -DCLAUDEXOR_DEV_REMOTE_RUNTIME)
 fi
+case "$ARCH" in
+  x86_64|arm64)
+    SWIFT_BUILD_ARGS+=(--arch "$ARCH")
+    ;;
+  universal)
+    SWIFT_BUILD_ARGS+=(--arch arm64 --arch x86_64)
+    ;;
+esac
 ( cd "$APP_PKG" && swift build "${SWIFT_BUILD_ARGS[@]}" )
 BIN="$APP_PKG/.build/release/ClaudexorApp"
 [ -x "$BIN" ] || { echo "ERROR: release binary not found at $BIN" >&2; exit 1; }
+if [ "$ARCH" = "universal" ]; then
+  LIPO_INFO="$(lipo -info "$BIN" 2>/dev/null || echo "")"
+  case "$LIPO_INFO" in
+    *x86_64*arm64*|*arm64*x86_64*) ;;
+    *) echo "ERROR: universal build requested but binary is not fat ($LIPO_INFO)" >&2; exit 1 ;;
+  esac
+fi
 
 echo "==> Assembling $APP"
 mkdir -p "$BUNDLES"
@@ -486,6 +528,7 @@ if [ "${MAKE_ZIP:-1}" = "1" ]; then
   elif [ -z "${NOTARY_PROFILE:-}" ]; then
     ZIP_SUFFIX="-signed-unnotarized"
   fi
+  [ -z "$ARCH_TAG" ] || ZIP_SUFFIX="$ZIP_SUFFIX-macos-$ARCH_TAG"
   ZIP="$DIST/Claudexor-$VERSION$ZIP_SUFFIX.zip"
   echo "==> Building ZIP"
   rm -f "$ZIP"
@@ -503,6 +546,7 @@ if [ "${MAKE_DMG:-0}" = "1" ]; then
   elif [ -z "${NOTARY_PROFILE:-}" ]; then
     DMG_SUFFIX="-signed-unnotarized"
   fi
+  [ -z "$ARCH_TAG" ] || DMG_SUFFIX="$DMG_SUFFIX-macos-$ARCH_TAG"
   DMG="$DIST/Claudexor-$VERSION$DMG_SUFFIX.dmg"
   STAGE="$BUNDLES/dmg-stage"
   rm -rf "$STAGE" "$DMG"; mkdir -p "$STAGE"

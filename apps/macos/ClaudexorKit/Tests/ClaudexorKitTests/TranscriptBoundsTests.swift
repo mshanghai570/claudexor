@@ -369,7 +369,13 @@ import Testing
         #expect(r.trimmed > 0)
         let held = r.blocks.reduce(0) { sum, block in
             guard case .tool(_, let b) = block else { return sum }
-            return sum + b.name.count + (b.kind?.count ?? 0) + (b.target?.count ?? 0) + (b.detail?.count ?? 0)
+            // Split the sum: a single chained optional-coalescing expression is
+            // slow enough for Swift < 6.3's type checker to time out.
+            let name = b.name.count
+            let kind = b.kind?.count ?? 0
+            let target = b.target?.count ?? 0
+            let detail = b.detail?.count ?? 0
+            return sum + name + kind + target + detail
         }
         #expect(held == r.textChars)
     }

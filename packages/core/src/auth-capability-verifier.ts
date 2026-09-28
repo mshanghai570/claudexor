@@ -208,6 +208,8 @@ export class AuthCapabilityVerifier {
           // The auth smoke is not a delegated run and gets no boundary; stated
           // rather than defaulted, so a new spec site cannot omit it silently.
           extra_mcp_servers: [],
+          // The smoke proves the AUTH route; user skills never ride it.
+          skills: [],
           stream_deltas: false,
           extra: request.abortSignal ? { abortSignal: request.abortSignal } : {},
         } satisfies HarnessRunSpec);

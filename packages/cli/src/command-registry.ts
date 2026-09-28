@@ -243,6 +243,34 @@ export const CLI_COMMANDS: readonly CliCommandSpec[] = [
   },
   ...HARNESS_COMMAND_SPECS,
   {
+    id: "skills",
+    positionalPatterns: [
+      { min: 0, max: 0 },
+      { prefix: ["list"], min: 1, max: 1 },
+    ],
+    usageArgs: "[list] [--all]",
+    summary:
+      "List the Agent Skills the engine will deliver to runs and which harnesses accept them",
+    flags: ["all", "json", "help", "version"],
+    mutability: "read",
+    stability: "stable",
+  },
+  {
+    id: "providers",
+    positionalPatterns: [
+      { min: 0, max: 0 },
+      { prefix: ["list"], min: 1, max: 1 },
+      { prefix: ["add"], min: 4, max: 5 },
+      { prefix: ["remove"], min: 2, max: 2 },
+    ],
+    usageArgs: "[list] | add <name> <base-url> <key-env> [model] | remove <name>",
+    summary:
+      "Manage user-defined OpenAI-compatible providers (each registers a provider-<name> harness); keys stay in the SecretStore",
+    flags: ["json", "help", "version"],
+    mutability: "read",
+    stability: "stable",
+  },
+  {
     id: "models",
     positionalPatterns: [{ min: 0, max: 0 }],
     usageArgs: "[--harness <id>] [--route <local_session|api_key>] [--all]",

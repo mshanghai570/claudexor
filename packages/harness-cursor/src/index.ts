@@ -20,6 +20,7 @@ import {
 import type { DoctorSpec, HarnessAdapter } from "@claudexor/core";
 import {
   abortSignalFromSpec,
+  brokenInstallAdvisory,
   HarnessUnavailableError,
   promptWithInstructions,
   providerScrubEnv,
@@ -151,6 +152,10 @@ function cursorApiKey(env?: Record<string, string | null | undefined>): string |
 type CursorApiSmokeCacheEntry = { result: CursorApiSmokeResult; expiresAtMs: number };
 type CursorRuntimeDeps = {
   detectVersion: typeof detectVersion;
+  /** Explains a missing binary when the filesystem still holds evidence of an
+   * install. Diagnostic only; surfaced in doctor so the dead end names the
+   * repair instead of just "not found". */
+  brokenInstallAdvisory: typeof brokenInstallAdvisory;
   nativeAuthOk: typeof probeCursorNativeAuth;
   cursorApiKey: typeof cursorApiKey;
   listCursorModels: CursorModelLister;
@@ -243,6 +248,7 @@ async function resolveCursorAuthRoute(
 export function createCursorAdapter(deps: Partial<CursorRuntimeDeps> = {}): HarnessAdapter {
   const runtime: CursorRuntimeDeps = {
     detectVersion,
+    brokenInstallAdvisory,
     nativeAuthOk: probeCursorNativeAuth,
     cursorApiKey,
     listCursorModels: (env, cwd) => queryCursorModels(BIN, env, cwd),
@@ -263,6 +269,7 @@ export function createCursorAdapter(deps: Partial<CursorRuntimeDeps> = {}): Harn
       smokeApiKey: (key, fresh) => smokeCursorApiKey(runtime, key, fresh),
       nativeEnv: cursorNativeEnv,
       fileStoreEnv: cursorFileStoreEnv,
+      brokenInstallAdvisory: runtime.brokenInstallAdvisory,
     });
   return {
     id: "cursor",

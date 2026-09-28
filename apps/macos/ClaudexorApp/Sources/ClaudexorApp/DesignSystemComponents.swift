@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ClaudexorKit
 
 /// Reusable design-system components (v0.10 UI redesign). Screens compose these
@@ -390,6 +391,88 @@ extension View {
     }
 }
 
+// MARK: - Liquid Glass availability (macOS 26 chrome, older-OS solids)
+
+/// The ONE Liquid Glass availability predicate (DESIGN_SYSTEM §3.1).
+///
+/// Liquid Glass is first-class chrome on macOS 26 and does not exist before it,
+/// so the deployment floor cannot simply rise with the SDK: below macOS 26 every
+/// glass surface falls back to the SOLID raised recipe (`surfaceRaised` +
+/// hairline) — the SAME appearance the design system already specifies for
+/// Reduce Transparency, so the non-Tahoe look is a reasoned, reviewed surface
+/// rather than a new one. `#available` itself must appear at each call site (the
+/// compiler only proves availability syntactically); this enum exists so the
+/// Reason lives in one place and the two chrome modifiers cannot drift.
+enum LiquidGlassChrome {
+    /// Whether Liquid Glass can actually be rendered here.
+    static var isAvailable: Bool {
+        if #available(macOS 26.0, *) { return true }
+        return false
+    }
+}
+
+/// Settings → Appearance, told in the chrome's OWN terms. This copy must stay
+/// availability-aware: after the Intel/macOS 15 port the app ships on a floor
+/// where Liquid Glass does not exist at all, so a caption that only describes
+/// the macOS 26 chrome is a caption that lies on the machine rendering it.
+/// The derivation is pure so the claim is unit-tested off-screen.
+enum AppearanceChromeCopy {
+    /// What the window actually renders here, in one sentence.
+    ///
+    /// The window BACKDROP is behind-window vibrancy (AppKit `NSVisualEffectView`,
+    /// not Liquid Glass) on every supported OS — that is the "matte glass" the
+    /// desktop shows through. What the port changed is the CHROME layered on top
+    /// of it: the composer, sidebar and header use real Liquid Glass on macOS 26
+    /// and a solid raised panel below it. Reduce Transparency forces the solid
+    /// variant either way.
+    static func backdropText(
+        liquidGlassAvailable: Bool = LiquidGlassChrome.isAvailable,
+        reduceTransparency: Bool = false
+    ) -> String {
+        let chrome = liquidGlassAvailable && !reduceTransparency
+            ? "Composer and sidebar use Liquid Glass."
+            : "Composer and sidebar use a solid raised panel (Liquid Glass needs macOS 26)."
+        return "The window is matte glass — the desktop shows faintly through it. "
+            + "\(chrome) Code and diffs stay on a solid surface for contrast. "
+            + "Reduce Transparency falls back to a solid backdrop."
+    }
+
+    /// The caption for the live Settings pane, reading the real environment.
+    static var backdropText: String {
+        backdropText(
+            liquidGlassAvailable: LiquidGlassChrome.isAvailable,
+            reduceTransparency: AmbientReduceTransparency.isEnabled)
+    }
+}
+
+/// One read of the Reduce-Transparency environment value. The chrome modifiers
+/// need it as an `@Environment` property; the appearance caption needs it as a
+/// plain value, and there is no way to read an Environment outside a view — so
+/// this mirrors the system setting for the non-view caller.
+enum AmbientReduceTransparency {
+    static var isEnabled: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+    }
+}
+
+/// `GlassEffectContainer`, or a plain passthrough below macOS 26.
+///
+/// The container's job is to make a CLUSTER of glass elements share one sampling
+/// region; with no glass to coordinate it has nothing to do, so the content must
+/// still render normally (it keeps its own layout and spacing either way).
+struct GlassChromeCluster<Content: View>: View {
+    var spacing: CGFloat? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) { content() }
+        } else {
+            content()
+        }
+    }
+}
+
 // MARK: - Chrome glass (floating panel) with a Reduce-Transparency solid fallback
 
 extension View {
@@ -418,12 +501,14 @@ private struct ComposerGlassModifier: ViewModifier {
     let shape: RoundedRectangle
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        if reduceTransparency {
+        // Below macOS 26 there is no glass to render, so the Reduce-Transparency
+        // solid recipe IS the chrome — same fill, same hairline, no new surface.
+        if #available(macOS 26.0, *), !reduceTransparency {
+            content.glassEffect(.regular, in: shape)
+        } else {
             content
                 .background(Theme.surfaceRaised, in: shape)
                 .overlay(shape.strokeBorder(Theme.separator, lineWidth: 1))
-        } else {
-            content.glassEffect(.regular, in: shape)
         }
     }
 }
@@ -432,21 +517,22 @@ private struct SidebarGlassModifier: ViewModifier {
     let shape: RoundedRectangle
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Theme.surfaceRaised, in: shape)
-                .overlay(shape.strokeBorder(Theme.separator, lineWidth: 1))
-                .clipShape(shape)
-                // Reduce-Transparency has no Liquid-Glass depth, so a soft shadow
-                // keeps the solid panel reading as FLOATING over the backdrop.
-                .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
-        } else {
+        if #available(macOS 26.0, *), !reduceTransparency {
             // Liquid Glass provides its own ambient depth/edge — wrap in a
             // GlassEffectContainer (Apple's coordinator for glass surfaces) and let
             // the material float; no extra fill/stroke (that would be glass-on-fill).
             GlassEffectContainer {
                 content.glassEffect(.regular, in: shape)
             }
+        } else {
+            content
+                .background(Theme.surfaceRaised, in: shape)
+                .overlay(shape.strokeBorder(Theme.separator, lineWidth: 1))
+                .clipShape(shape)
+                // No Liquid-Glass depth below macOS 26 (or under Reduce
+                // Transparency), so a soft shadow keeps the solid panel reading as
+                // FLOATING over the backdrop.
+                .shadow(color: .black.opacity(0.12), radius: 14, x: 0, y: 6)
         }
     }
 }

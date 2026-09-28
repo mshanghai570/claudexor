@@ -81,6 +81,11 @@ export const CLAUDE_CAPABILITY_PROFILE: HarnessCapabilityProfile =
     // Claude does not sandbox its MCP servers, so the belt reaches the daemon at
     // workspace_write — no full-access requirement (contrast codex).
     mcp_injection_requires_full_access: false,
+    // Engine-resolved Agent Skills ride `--plugin-dir` (skills-plugin.ts), the
+    // vendor's own per-invocation plugin switch. Writing lanes only: a readonly
+    // lane passes --disable-slash-commands, which is the readonly enforcement
+    // surface, so skills stay off there by policy.
+    skill_injection: true,
     // Live input rides the native stdin queue (live-input.ts): a user frame
     // written while a tool runs is queued at once and consumed inside the same
     // turn right after the current tool batch; one that arrives during the

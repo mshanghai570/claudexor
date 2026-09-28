@@ -1,0 +1,127 @@
+name: Build Intel DMG
+
+# The ONLY lane that produces a distributable x86_64 (Intel) .dmg.
+#
+# `release.yml`'s package-macos job runs on macos-26 (arm64) and hard-requires
+# Developer ID + notarytool secrets, so it can never emit an Intel artifact, and
+# `ci.yml`'s macos-intel lane only ASSERTS the x86_64 slice (binary arch +
+# deployment floor) — it packages nothing. This workflow closes that gap: an
+# unsigned, local-use x64 DMG that anyone can download as a run artifact.
+#
+# It is deliberately opt-in (`workflow_dispatch`, plus `v*` tags) because the
+# release build is a full Swift release compile plus the bundle smoke suite,
+# which is far too slow to run on every push.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claudexor-intel-dmg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-intel-dmg:
+    name: Intel (x86_64) DMG
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # A fork's refs carry no release TAGS, and build-app.sh stamps the build
+      # sha from git when CLAUDEXOR_BUILD_SHA is absent. Fetch the parent's
+      # tags (resolved dynamically) so version stamping is identical here and
+      # on a non-fork checkout.
+      - name: Fetch upstream release tags (a fork does not inherit them)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          parent="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.parent.full_name // ""')"
+          if [ -n "$parent" ]; then
+            git fetch --quiet --no-tags "https://github.com/$parent" 'refs/tags/*:refs/tags/*'
+          fi
+          echo "tags available: $(git tag | wc -l | tr -d ' ')"
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Same toolchain pin as the ci.yml Intel lane, for the same reason: this
+      # image's default Xcode 16.4 cannot parse swift-tools-version:6.2 nor
+      # supply the macOS 26 SDK the Liquid Glass paths are gated against.
+      # Matched rather than pinned, so an image refresh cannot break the gate
+      # the day it drops one build.
+      - name: Select the newest Xcode 26 on this image
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XCODE" ] || { echo "::error::no Xcode 26 on this image"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      # `pnpm build` compiles the universal Darwin process-identity helper; on an
+      # Intel runner the x86_64 slice is the one that actually executes.
+      - name: Build (compiles the universal Darwin helper on Intel)
+        run: pnpm build
+
+      - name: Package the unsigned x86_64 app, ZIP and DMG
+        shell: bash
+        env:
+          CLAUDEXOR_BUILD_SHA: ${{ github.sha }}
+          CLAUDEXOR_ARCH: host
+          MAKE_DMG: "1"
+        run: apps/macos/scripts/build-app.sh
+
+      # Assert the artifact rather than trusting the build's exit code: the
+      # bytes must be a real x86_64 Mach-O, the DMG must be a readable image, and
+      # the recorded checksums must match the files actually uploaded.
+      - name: Verify the packaged artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -e "process.stdout.write(require('./packages/cli/package.json').version)")"
+          stem="apps/macos/dist/Claudexor-${version}-unsigned-macos-x64"
+
+          app="apps/macos/dist/bundle.noindex/Claudexor.app/Contents/MacOS/ClaudexorApp"
+          test -x "$app"
+          file "$app" | grep -q 'x86_64' \
+            || { echo "::error::$app is not an x86_64 binary"; file "$app"; exit 1; }
+          /usr/bin/otool -l "$app" | grep -A3 LC_BUILD_VERSION | grep -q 'minos 15.0' \
+            || { echo "::error::$app does not carry the macOS 15.0 deployment floor"; exit 1; }
+          /usr/bin/lipo -info "$app"
+
+          test -f "$stem.dmg" || { echo "::error::$stem.dmg was not produced"; exit 1; }
+          hdiutil verify "$stem.dmg"
+          shasum -a 256 -c "$stem.dmg.sha256"
+          shasum -a 256 -c "$stem.zip.sha256"
+          /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/mnt" "$stem.dmg"
+          test -d "$RUNNER_TEMP/mnt/Claudexor.app"
+          /usr/bin/hdiutil detach "$RUNNER_TEMP/mnt"
+
+          ls -la "$stem".*
+
+      - name: Upload the Intel DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: claudexor-intel-x64-dmg
+          path: |
+            apps/macos/dist/Claudexor-*-unsigned-macos-x64.dmg
+            apps/macos/dist/Claudexor-*-unsigned-macos-x64.dmg.sha256
+            apps/macos/dist/Claudexor-*-unsigned-macos-x64.zip
+            apps/macos/dist/Claudexor-*-unsigned-macos-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 30

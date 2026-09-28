@@ -434,6 +434,45 @@ describe("harness install --target local", () => {
     }
   });
 
+  it("names a timed-out --version probe as a timeout, not a mysterious missing status", () => {
+    const home = mkdtempSync(join(tmpdir(), "claudexor-cursor-timeout-"));
+    const base = installerSpawn({ home, harness: "cursor", target: "local" });
+    // A vendor launcher that prints its version and then lingers past the
+    // probe deadline is killed mid-exit. That is a TIMEOUT, and saying so keeps
+    // the operator from reading a healthy install as a broken binary.
+    const spawn = vi.fn((binary: string, argv: string[], spawnOptions?: { stdio?: unknown }) => {
+      if (argv.length === 1 && argv[0] === "--version") {
+        return {
+          status: null,
+          signal: "SIGTERM",
+          error: Object.assign(new Error("spawnSync cursor-agent ETIMEDOUT"), {
+            code: "ETIMEDOUT",
+          }),
+          stdout: "cursor-agent 1.2.3\n",
+          stderr: "",
+        } as never;
+      }
+      return base(binary, argv, spawnOptions);
+    });
+    try {
+      const result = runHarnessInstaller("cursor", {
+        home,
+        target: "local",
+        spawn: spawn as never,
+        lock: false,
+        sourceEnv: { PATH: "" },
+      });
+      expect(result).toMatchObject({
+        exitCode: 1,
+        code: "install_verification_failed",
+        refusal: expect.stringContaining("timed out after 10000ms"),
+      });
+      expect(result.refusal).not.toContain("without a status");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a zero-byte cursor-agent even when it is launchable", () => {
     const home = mkdtempSync(join(tmpdir(), "claudexor-cursor-zero-launcher-"));
     const installed = join(home, ".local", "bin", "cursor-agent");

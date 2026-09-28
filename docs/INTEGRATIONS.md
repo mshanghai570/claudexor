@@ -10,7 +10,7 @@ changing Claudexor.
 
 | Surface | Current role | Stability |
 |---|---|---|
-| CLI | Human and automation entrypoint: run verbs (init, ask — `--deep-scan` for the research sweep — agent — `--delegate` for the delegation belt — best-of, plan, create), run inspection/recovery (inspect, follow, retry, run-again, apply, decision, review), ops (project, models, harness, doctor, quota, accounts, plugin, daemon, gc, auth, secrets, profiles, settings, trust, setup, remote, release), and agent introspection (capabilities, about, `help --json`). | Stable contract: the verb/flag surface (`help --json`) and `--json` output keys on run paths (add-only). JSON support exists on primary machine-readable paths, not every subcommand. |
+| CLI | Human and automation entrypoint: run verbs (init, ask — `--deep-scan` for the research sweep — agent — `--delegate` for the delegation belt — best-of, plan, create), run inspection/recovery (inspect, follow, retry, run-again, apply, decision, review), ops (project, models, harness, doctor, quota, accounts, plugin, daemon, gc, auth, secrets, profiles, settings, trust, setup, remote, release, providers, skills), and agent introspection (capabilities, about, `help --json`). | Stable contract: the verb/flag surface (`help --json`) and `--json` output keys on run paths (add-only). JSON support exists on primary machine-readable paths, not every subcommand. |
 | Daemon and control API | Local durable queue, Agent runs, caller-owned model operations, artifacts, SSE events, settings, harness status, secrets metadata, apply, and run control. | Stable contract: endpoints and DTOs per `docs/reference/endpoints.json` + generated schemas (add-only fields). Loopback + bearer token only. |
 | MCP server | Exposes Claudexor tools to MCP clients. | Stable contract: the tool set with input/output schemas. Tool list follows the implementation, not old docs. |
 | ACP server | Lets compatible editors or agents talk to Claudexor as a local agent surface. | Experimental (may change in minors, disclosed in the CHANGELOG). |
@@ -746,6 +746,46 @@ files:
 
 Both behaviors are automatic. If you would rather manage the files yourself,
 keep your own `CLAUDE.md` (it is never touched) or add an `AGENTS.md`.
+
+## Agent Skills
+
+Claudexor resolves Agent Skills (the `<skill>/SKILL.md` convention) and delivers
+them to the harnesses that can load skills at launch. Three source directories
+are read, weakest first, so a project skill overrides the user's skill of the
+same name:
+
+1. `<config dir>/skills` — Claudexor-managed user skills.
+2. `<project root>/.claudexor/skills` — versioned project skills.
+3. Every `skills.directories` entry in the global config, in order (a leading
+   `~` is expanded).
+
+A source directory holds one skill per child directory containing `SKILL.md`;
+a source directory that IS a skill (it contains `SKILL.md` directly) counts as
+one skill. Only names matching `^[a-z0-9][a-z0-9-]*$` are delivered — every
+other entry is reported, never silently renamed.
+
+Delivery is per-harness and honest about capability:
+
+- **claude** declares `skill_injection` and receives skills as a plugin
+directory passed with the vendor's `--plugin-dir`. The directory is
+materialized under the Claudexor-owned root
+(`<owned root>/skills-plugins/claude/<digest>`), keyed by a digest of the
+resolved skill set: reruns reuse it, two projects with different skills cannot
+overwrite each other's plugin mid-run, and stale directories are pruned by age.
+Nothing is ever written into the vendor config dir, so skills the user
+installed there are never touched. `SKILL.md` is linked to its source when the
+platform allows it, so editing a skill takes effect on the next run.
+- **Read-only lanes are deliberately excluded.** A readonly claude lane passes
+  `--disable-slash-commands`, the vendor's own "disable all skills" switch, and
+  that is the readonly enforcement surface — so a readonly run receives no
+  skills, and says so on stderr instead of dropping them silently.
+- **Other harnesses** (codex, cursor, opencode, agy, raw API) do not declare
+  `skill_injection`, so the engine hands them an empty list rather than claiming
+  a skill delivery they cannot honor; they read whatever skills their own config
+  dir already holds (see Host Plugins above).
+
+`claudexor skills list [--all] [--json]` performs exactly the discovery the run
+path performs and names the harnesses that would receive the result.
 
 ## External Harness Adapters
 

@@ -99,7 +99,10 @@ composer](docs/assets/app-agent-run.jpg)
   `ANTHROPIC_API_KEY`, ... as fallbacks; the raw-API route needs only a key).
   Log in through Claudexor, not the bare vendor CLI — see
   [Install And Login](docs/AGENT_ONBOARDING.md#install-and-login)
-- macOS for the desktop app; the CLI/daemon also run on Linux
+- macOS 15 or newer for the desktop app: on macOS 26 it uses first-class
+  Liquid Glass chrome, and on older systems (including Intel Macs, which macOS 26
+  never reaches) the same chrome falls back to the documented solid surface. The
+  CLI/daemon run on Intel macOS and Linux too
 
 ## Install
 

@@ -2,6 +2,7 @@ import type { AuthPreference, AuthSourceReadiness } from "@claudexor/schema";
 import { ConformanceReport as ConformanceReportSchema } from "@claudexor/schema";
 import type { DoctorSpec, HarnessAccountDoctorReceipt } from "@claudexor/core";
 import {
+  BIN as CURSOR_BIN,
   cursorObservationAuthenticated,
   cursorObservationError,
   cursorObservationIdentity,
@@ -22,6 +23,9 @@ export interface CursorDoctorDeps {
   /** True when the supplied env explicitly selects the vendor FILE store —
    * the only env class whose native session may be probed (D-U3). */
   fileStoreEnv(env?: EnvMap): boolean;
+  /** Explains a missing binary when the filesystem still holds evidence of an
+   * install. Diagnostic only; null when there is nothing better to say. */
+  brokenInstallAdvisory(bin: string): string | null;
 }
 
 /** One Cursor doctor probe with an optional Accounts identity sidecar. */
@@ -31,12 +35,25 @@ export async function probeCursorDoctorForAccounts(
 ): Promise<HarnessAccountDoctorReceipt> {
   const version = await runtime.detectVersion(spec.abortSignal);
   if (version === null) {
+    // When the filesystem still holds evidence of a broken install (dangling
+    // symlink, stripped exec bit, a Homebrew dir still listing the cask), say
+    // so instead of dead-ending at "not found" — same contract as Codex.
+    const advisory = runtime.brokenInstallAdvisory(CURSOR_BIN);
     return {
       report: ConformanceReportSchema.parse({
         harness_id: "cursor",
         status: "unavailable",
-        checks: [{ id: "installed", status: "fail", detail: "cursor-agent not found" }],
-        reasons: ["cursor-agent not found (install Cursor CLI or set CLAUDEXOR_CURSOR_BIN)"],
+        checks: [
+          {
+            id: "installed",
+            status: "fail",
+            detail: advisory ? `cursor-agent not found — ${advisory}` : "cursor-agent not found",
+          },
+        ],
+        reasons: [
+          "cursor-agent not found (install Cursor CLI or set CLAUDEXOR_CURSOR_BIN)",
+          ...(advisory ? [advisory] : []),
+        ],
       }),
       identity: null,
     };

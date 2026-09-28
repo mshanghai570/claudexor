@@ -392,6 +392,19 @@ export const HarnessCapabilityProfile = z
         "An injected MCP server can only reach the daemon (belt) at full access; below it the harness sandbox cancels the call. true => Delegate below full access degrades to ordinary Agent with a durable typed receipt.",
       ),
     /**
+     * The adapter can inject engine-resolved Agent Skills at launch: claude via
+     * a materialized plugin directory plus `--plugin-dir`. false (default) means
+     * the engine does not hand this harness skills — it reads only the skills
+     * already installed in its own config dir by `claudexor plugin install`, and
+     * `HarnessRunSpec.skills` stays empty rather than being silently dropped.
+     */
+    skill_injection: z
+      .boolean()
+      .default(false)
+      .describe(
+        "The adapter can inject engine-resolved Agent Skills at launch (claude via --plugin-dir); false = skills reach this harness only through its own installed config.",
+      ),
+    /**
      * Live input into a RUNNING session (`POST /v2/runs/:id/messages`). Truthful
      * per adapter: codex declares mid_turn (turn/steer, recorded on 0.153.3 and
      * 0.156.1); claude declares next_tool_boundary (a uuid-bearing user frame on
@@ -535,6 +548,31 @@ export const ExtraMcpServer = z
   );
 export type ExtraMcpServer = z.infer<typeof ExtraMcpServer>;
 
+/**
+ * One engine-resolved Agent Skill handed to a harness that can load skills at
+ * launch. `path` is the skill's own directory (the one holding SKILL.md), so the
+ * adapter materializes a vendor-native view of it without re-deriving the
+ * layout. The engine only ever sets this on adapters declaring
+ * `capability_profile.skill_injection`.
+ */
+export const ExtraSkill = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .regex(
+        /^[a-z0-9][a-z0-9-]*$/,
+        "skill name must be lowercase alphanumeric/hyphen (it becomes the vendor skill id)",
+      )
+      .describe("Skill id the harness exposes."),
+    path: z
+      .string()
+      .min(1)
+      .describe("Absolute path to the skill directory that contains SKILL.md."),
+  })
+  .describe("One engine-resolved Agent Skill for a skill-injecting harness.");
+export type ExtraSkill = z.infer<typeof ExtraSkill>;
+
 /** Spec passed to a harness adapter's run(). */
 export const HarnessRunSpec = z
   .object({
@@ -677,6 +715,16 @@ export const HarnessRunSpec = z
       .array(ExtraMcpServer)
       .default([])
       .describe("Extra MCP servers injected into the harness sandbox; adapter-translated."),
+    /**
+     * Engine-resolved Agent Skills for adapters declaring
+     * `capability_profile.skill_injection` (see the global `skills` config).
+     * Empty for every other harness, so an unsupported lane never claims skills
+     * it did not receive.
+     */
+    skills: z
+      .array(ExtraSkill)
+      .default([])
+      .describe("Agent Skills injected at launch; only set for skill-injecting adapters."),
     /**
      * JSON Schema constraining the harness's FINAL message (a caller-supplied
      * per-run output schema on agent/ask answers). Passed only to routes whose
