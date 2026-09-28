@@ -46,19 +46,34 @@ describe("exact-v3.3.7 legacy writer claimant fixture", () => {
       sourceBlob: "f2cde81164ee0843b22fb8266e43193d2f05f1eb",
       sourceSha256: "f8bf76956c24bdadec40ff2917f59bc6c2dfff02e15b9f4a4cc14ec9151b8344",
     });
-    const source = execFileSync("git", ["show", `${provenance.tag}:${provenance.sourcePath}`], {
-      cwd: resolve(import.meta.dirname, "../../.."),
-      encoding: "utf8",
-    });
+    // Anchor provenance on the PINNED COMMIT, not on the `v3.3.7` tag name.
+    // A clone of a FORK does not inherit the upstream repository's tag refs, so
+    // keying the lookup off the tag made this test fail on every fork — with
+    // `fatal: invalid object name 'v3.3.7'` — even though the bytes it exists to
+    // verify were present the whole time. The commit is what the tag points at
+    // and it travels with the history, so a `fetch-depth: 0` checkout (what CI
+    // already does) is enough. When the tag IS present we still assert it peels
+    // to this same commit, so a moved or re-pointed tag cannot silently
+    // repoint the fixture.
+    const repoRoot = resolve(import.meta.dirname, "../../..");
+    const gitOut = (args: string[]): string =>
+      execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+    const git = (args: string[]): string => gitOut(args).trim();
+    // NOTE: raw bytes, deliberately untrimmed — the recorded sourceSha256 is
+    // over the exact file contents, so normalizing here would break the pin.
+    const source = gitOut(["show", `${provenance.commit}:${provenance.sourcePath}`]);
     const fixture = readFileSync(claimantPath, "utf8");
-    expect(
-      execFileSync("git", ["rev-parse", `${provenance.tag}^{commit}`], { encoding: "utf8" }).trim(),
-    ).toBe(provenance.commit);
-    expect(
-      execFileSync("git", ["rev-parse", `${provenance.tag}:${provenance.sourcePath}`], {
+    const tagPresent =
+      spawnSync("git", ["rev-parse", "--verify", "--quiet", `${provenance.tag}^{commit}`], {
+        cwd: repoRoot,
         encoding: "utf8",
-      }).trim(),
-    ).toBe(provenance.sourceBlob);
+      }).status === 0;
+    if (tagPresent) {
+      expect(git(["rev-parse", `${provenance.tag}^{commit}`])).toBe(provenance.commit);
+    }
+    expect(git(["rev-parse", `${provenance.commit}:${provenance.sourcePath}`])).toBe(
+      provenance.sourceBlob,
+    );
     expect(sha256(source)).toBe(provenance.sourceSha256);
     expect(sha256(fixture)).toBe(provenance.fixtureSha256);
     for (const marker of provenance.parityMarkers) {

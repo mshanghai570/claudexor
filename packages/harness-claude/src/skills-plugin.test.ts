@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HarnessRunSpec } from "@claudexor/schema";
 import { claudeArgsForSpec } from "./index.js";
-import { claudeSkillsPlugin, claudeSkillsRoot, skillsSetDigest } from "./skills-plugin.js";
+import {
+  claudeSkillsPlugin,
+  claudeSkillsPluginForSpec,
+  claudeSkillsRoot,
+  skillsSetDigest,
+} from "./skills-plugin.js";
 
 let root: string;
 let prevConfigDir: string | undefined;
@@ -96,5 +101,50 @@ describe("claudeArgsForSpec skills wiring", () => {
     expect(
       HarnessRunSpec.parse({ ...spec("workspace_write", []), skills: undefined }).skills,
     ).toEqual([]);
+  });
+});
+
+describe("claudeSkillsPluginForSpec", () => {
+  it("declines readonly lanes out loud instead of dropping skills silently", () => {
+    const warnings: string[] = [];
+    const result = claudeSkillsPluginForSpec({
+      skills: [{ name: "alpha", path: writeSkill("alpha") }],
+      access: "readonly",
+      warn: (m) => warnings.push(m),
+    });
+    expect(result.pluginDir).toBeNull();
+    expect(result.names).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("readonly lane disables skills");
+  });
+
+  it("materializes for a writable lane and prefixes warnings with the tool tag", () => {
+    const warnings: string[] = [];
+    const result = claudeSkillsPluginForSpec({
+      skills: [{ name: "alpha", path: writeSkill("alpha") }],
+      access: "workspace_write",
+      warn: (m) => warnings.push(`[claudexor] ${m}`),
+    });
+    expect(result.pluginDir).toBe(
+      join(
+        claudeSkillsRoot(),
+        skillsSetDigest([{ name: "alpha", path: join(root, "src", "alpha") }]),
+      ),
+    );
+    expect(result.names).toEqual(["alpha"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays silent and does no work when the spec carries no skills", () => {
+    const warnings: string[] = [];
+    for (const skills of [undefined, []]) {
+      const result = claudeSkillsPluginForSpec({
+        skills,
+        access: "readonly",
+        warn: (m) => warnings.push(m),
+      });
+      expect(result.pluginDir).toBeNull();
+    }
+    expect(warnings).toEqual([]);
   });
 });

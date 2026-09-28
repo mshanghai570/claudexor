@@ -47,7 +47,7 @@ import {
 } from "./capability-profile.js";
 export { CLAUDE_MANAGED_LOGIN, claudeQuotaModelAliases } from "./capability-profile.js";
 import { claudeNativeLoginRemedy } from "./doctor-remedy.js";
-import { claudeSkillsPlugin } from "./skills-plugin.js";
+import { claudeSkillsPluginForSpec } from "./skills-plugin.js";
 import { claudeNativeHomeEnv, defaultNativeClaudeConfigDir } from "./native-home.js";
 export { claudeAccountIdentity, defaultNativeClaudeConfigDir } from "./native-home.js";
 import { createClaudeParser } from "./parse.js";
@@ -940,23 +940,9 @@ async function* runClaude(
   const effort = await claudeRunEffortResolution(spec, runtime, abortSignalFromSpec(spec));
   spec = applyClaudeRunProcessing(spec, nativeEnv.CLAUDE_CONFIG_DIR, useSubscription);
   const processing = spec.processing;
-  // Skills are deliberately OFF on read-only lanes: permissionArgs() passes
-  // --disable-slash-commands, which disables skills by policy (they are an
-  // instruction/execution surface). Say so instead of dropping them silently.
-  let skillsPluginDir: string | null = null;
-  if ((spec.skills ?? []).length > 0) {
-    if (spec.access === "readonly") {
-      console.error(
-        `[claudexor] ${spec.skills.length} skill(s) not injected: the claude readonly lane disables skills (--disable-slash-commands)`,
-      );
-    } else {
-      const skillsPlugin = claudeSkillsPlugin(spec.skills);
-      skillsPluginDir = skillsPlugin.pluginDir;
-      for (const problem of skillsPlugin.problems) {
-        console.error(`[claudexor] skill problem: ${problem}`);
-      }
-    }
-  }
+  // Skills are OFF on the readonly lane by policy (--disable-slash-commands);
+  // claudeSkillsPluginForSpec owns that decision and says so out loud.
+  const skillsPluginDir = claudeSkillsPluginForSpec(spec).pluginDir;
   const args = claudeArgsForSpec(
     spec,
     interactive,

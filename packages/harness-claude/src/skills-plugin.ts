@@ -68,6 +68,36 @@ export interface ClaudeSkillsPluginResult {
 }
 
 /**
+ * Resolve the plugin directory for one attempt's spec, including the readonly
+ * policy decision. Lives here rather than in the run path so index.ts stays a
+ * wiring shell instead of accumulating per-feature branching.
+ *
+ * The readonly lane passes `--disable-slash-commands`, which disables skills by
+ * policy (they are an instruction/execution surface), so a readonly run gets no
+ * plugin. That is reported on stderr rather than dropped silently — a user who
+ * configured skills deserves to know the lane declined them.
+ */
+export function claudeSkillsPluginForSpec(spec: {
+  skills?: readonly ExtraSkill[] | undefined;
+  access: string;
+  /** Injection sink, so tests can assert without writing to stderr. */
+  warn?: (message: string) => void;
+}): ClaudeSkillsPluginResult {
+  const warn = spec.warn ?? ((message: string) => console.error(`[claudexor] ${message}`));
+  const skills = spec.skills ?? [];
+  if (skills.length === 0) return { pluginDir: null, names: [], problems: [] };
+  if (spec.access === "readonly") {
+    warn(
+      `${skills.length} skill(s) not injected: the claude readonly lane disables skills (--disable-slash-commands)`,
+    );
+    return { pluginDir: null, names: [], problems: [] };
+  }
+  const result = claudeSkillsPlugin(skills);
+  for (const problem of result.problems) warn(`skill problem: ${problem}`);
+  return result;
+}
+
+/**
  * Materialize `spec.skills` for one attempt. Returns `pluginDir: null` when the
  * list is empty or every skill failed to materialize, so the caller passes no
  * flag instead of pointing Claude at an empty plugin.

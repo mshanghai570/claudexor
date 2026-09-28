@@ -60,3 +60,17 @@ export function resolveRunSkills(input: {
     problems: discovery.problems,
   };
 }
+
+/**
+ * The `HarnessRunSpec.skills` field for one attempt, as a single expression.
+ * A thin wrapper so the orchestrator's spec construction stays a field list
+ * instead of growing an inline object literal per feature.
+ */
+export function specSkills(input: {
+  config: GlobalConfig | undefined;
+  projectRoot: string;
+  supportsSkillInjection: boolean;
+  globalDir?: string;
+}): ExtraSkill[] {
+  return resolveRunSkills(input).skills;
+}
