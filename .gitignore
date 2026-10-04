@@ -29,6 +29,7 @@ CLAUDE.md
 .claude/
 .cursor/
 .opencode/
+.agent-orchestration/
 
 # Local toolchain
 .toolchain/
