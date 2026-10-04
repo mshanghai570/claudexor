@@ -252,6 +252,23 @@ extension AppModel {
                     guard localConnectionLeaseIsCurrent(generation, candidate) else {
                         return .superseded
                     }
+                    // A `.failed` Accounts verdict can only be STALE here. The full
+                    // snapshot is explicit-only, so a refresh that landed in a
+                    // reconnect window (gateway momentarily nil → "Engine offline —
+                    // reconnect to refresh Accounts.") is never retried by the
+                    // connect path, and `.reconnect`/`.failOffline` retire the client
+                    // WITHOUT running enterHardOffline's state cleanup — the red
+                    // banner then outlived the outage it described, sitting next to a
+                    // live Control API URL. This handshake just proved the gateway
+                    // works: retire that verdict and reload rather than leave a stale
+                    // one on screen. An ordinary `.idle`/`.loaded` projection keeps
+                    // the explicit-only contract and is left alone.
+                    if case .failed = accountsLoadStates[.local] {
+                        _ = await refreshAccounts(locationID: .local)
+                        guard localConnectionLeaseIsCurrent(generation, candidate) else {
+                            return .superseded
+                        }
+                    }
                     // A popover may survive a transient reconnect. Its existing
                     // subscriber does not re-run onAppear, so resume exactly one
                     // cheap display read against the replacement gateway.

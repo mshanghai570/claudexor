@@ -4258,6 +4258,63 @@ struct AppModelRefreshTests {
         #expect(model.engineIdentity?.version == "3.1.1")
     }
 
+    /// A refresh that lands while the gateway is momentarily nil stores
+    /// "Engine offline — reconnect to refresh Accounts." — and the Accounts
+    /// snapshot being explicit-only meant NOTHING retried it on reconnect,
+    /// while `.reconnect` retires the client WITHOUT enterHardOffline's state
+    /// cleanup. The red banner therefore outlived the outage it described,
+    /// rendering beside a live Control API URL. Adoption must retire that
+    /// verdict and reload instead of leaving a stale one on screen.
+    @MainActor
+    @Test func reconnectRetiresTheStaleOfflineAccountsVerdict() async throws {
+        defer { AppRequestStubURLProtocol.handler = nil }
+        let gateway = appTestGateway(port: 41167)
+        let model = AppModel(client: gateway, requestNotificationAuthorization: false)
+        // Connectivity-only: the reconciliation authority is stubbed so the
+        // probe adopts rather than probing a host daemon.
+        model.localDaemonReconciler = LocalDaemonReconciler(
+            daemon: AppRuntimeDaemonControl(
+                isBusyProbe: { nil }, handshakeIdentityProbe: { nil }),
+            lifecycleOwner: model.localRuntimeLifecycleOwner,
+            targetClosure: { nil })
+        model.health = .connecting
+        let staleReason = "Engine offline — reconnect to refresh Accounts."
+        model.accountsLoadStates[.local] = .failed(staleReason)
+
+        let accountsCalls = AppRefreshCallCounter()
+        AppRequestStubURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/healthz":
+                return (appResponse(for: request), Data(#"{"ok":true}"#.utf8))
+            case "/v2/handshake":
+                return (appResponse(for: request), Data(
+                    #"{"protocolMajor":3,"compatible":true,"operationsPath":"/v2/operations","engine":{"version":"3.17.0","sha":"sha-A","entry":"/opt/claudexor/daemon.js"}}"#.utf8))
+            case "/v2/credential-profiles":
+                accountsCalls.increment()
+                return (appResponse(for: request), appAccountsSnapshot(
+                    profileID: "repaired", displayName: "Repaired",
+                    observedAt: "2026-09-28T00:00:00Z"))
+            case "/v2/harnesses":
+                return (appResponse(for: request), appHarnessSnapshot(
+                    version: "3.17.0", status: "ok"))
+            default:
+                throw AppRefreshTestError.badRequest
+            }
+        }
+
+        #expect(model.activeAccountsLoadState == .failed(staleReason))
+        let result = await model.tryConnect(
+            candidate: gateway, endpoint: "127.0.0.1:41167",
+            generation: model.connectionGeneration)
+
+        #expect(result == .connected)
+        // The repair actually RELOADED rather than merely dropping the verdict.
+        #expect(accountsCalls.count >= 1)
+        #expect(model.activeAccountsLoadState == .loaded)
+        #expect(model.credentialProfiles.map(\.profile.profileId) == ["repaired"])
+        model.suspendAccountsQuotaObserver(at: .local, discardCursor: true)
+    }
+
     /// W4.3: vendor cost ticks are VALUATION — they must never move the cash
     /// display. Only the ledger's budget.cash disclosure does.
     @MainActor
