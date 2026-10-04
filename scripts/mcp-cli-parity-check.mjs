@@ -230,6 +230,15 @@ const CLI_ONLY_EXEMPT = {
   "revoke-test": "trust subcommand flag for an external exact-command grant, not a run control",
   "from-env": "secrets subcommand flag, not a run control",
   "display-name": "profiles add subcommand flag (credential-profile label), not a run control",
+  command:
+    "harness add subcommand flag (executable of a config-declared external harness), not a run control",
+  arg: "harness add subcommand flag (one argv token for a config-declared external harness), not a run control",
+  "model-arg":
+    "harness add subcommand flag (the {model} argv token of a config-declared external harness), not a run control",
+  stream:
+    "harness add subcommand flag (stdout shape of a config-declared external harness), not a run control",
+  "key-env":
+    "harness add subcommand flag (credential slot of a config-declared external harness), not a run control",
   "apply-mode": "decision subcommand flag, not a run control",
   feedback: "decision subcommand flag, not a run control",
   diff: "review verb flag, not a run control",

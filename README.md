@@ -618,6 +618,33 @@ claudexor settings set paid_fallback when_unavailable
 claudexor quota --refresh --json
 ```
 
+### Adding Another Agent CLI (Config-Declared Harnesses)
+
+Any agent CLI that can take a prompt on the command line becomes a harness with
+one config row — no adapter package, no rebuild:
+
+```bash
+claudexor harness add            # list the shippable presets
+claudexor harness add gemini     # writes one global.external_harnesses row
+claudexor harness add mytool --command mycli --arg=--json --stream jsonl
+claudexor harness remove mytool
+claudexor doctor --harness gemini
+```
+
+Presets ship for Cline, Gemini CLI, Kilo, GitHub Copilot, Aider, Grok Build,
+Devin, and Mistral Vibe. A row declares the executable, the argv (with a
+`{prompt}` placeholder and optional `{model}` tokens), the stdout shape
+(`jsonl` for one JSON object per line, `text` for prose), an optional API-key
+slot whose material stays in the SecretStore, and per-access-profile flags
+(`access_args`) so a read-only request is refused rather than silently widened.
+Every field is editable in `~/.claudexor/v3/config.yaml`; presets marked
+"verify flags" come from vendor docs rather than a live `--help`.
+
+Doctor reports such a harness as *ready* only when the row's `auth_probe` —
+argv whose exit 0 proves the vendor answered — passes; without one the honest
+verdict is "present but unproven" and the CLI's own auth errors surface on the
+run instead. Restart the engine after editing rows (`claudexor daemon restart`).
+
 ## Daemon And Control API
 
 The managed daemon is the mandatory runtime authority and normally auto-starts

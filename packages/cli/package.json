@@ -27,6 +27,7 @@
     "@claudexor/harness-claude": "workspace:*",
     "@claudexor/harness-codex": "workspace:*",
     "@claudexor/harness-cursor": "workspace:*",
+    "@claudexor/harness-external": "workspace:*",
     "@claudexor/harness-fake": "workspace:*",
     "@claudexor/harness-opencode": "workspace:*",
     "@claudexor/harness-raw-api": "workspace:*",

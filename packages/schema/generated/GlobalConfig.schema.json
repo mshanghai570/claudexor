@@ -577,6 +577,142 @@
           "default": [],
           "description": "User-defined OpenAI-compatible providers; each registers a raw-API harness usable as an AI agent."
         },
+        "external_harnesses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "allOf": [
+                  {
+                    "pattern": "\\S"
+                  },
+                  {
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  }
+                ],
+                "description": "Harness id (e.g. gemini, cline, copilot); also the `--harness` selector."
+              },
+              "display_name": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S",
+                "description": "Human-facing name shown in harness lists."
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S",
+                "description": "Executable for the CLI, resolved via PATH (absolute path also accepted)."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Argv tokens passed before the prompt. A {prompt} placeholder (whole token or inside one) places the prompt there; without it the prompt is appended last."
+              },
+              "model_args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Argv tokens inserted before the prompt when the run pins a model; {model} is substituted for the model id."
+              },
+              "stream": {
+                "type": "string",
+                "enum": [
+                  "jsonl",
+                  "text"
+                ],
+                "default": "jsonl",
+                "description": "How the CLI writes stdout: jsonl = one JSON object per line (parsed into harness events), text = plain prose lines (emitted as message events)."
+              },
+              "key_env": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Env var (or SecretStore slot) holding this CLI's API key; null = the CLI's own interactive login."
+              },
+              "auth_probe": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Argv appended to `command` whose exit 0 PROVES authentication (e.g. auth status); null = auth cannot be proven, so the harness stays degraded and never claims doctor-ok."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {},
+                "description": "Extra environment variables exported for this CLI's processes."
+              },
+              "access_args": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "propertyNames": {
+                  "enum": [
+                    "readonly",
+                    "workspace_write",
+                    "full",
+                    "inherit_native"
+                  ]
+                },
+                "default": {},
+                "description": "Argv appended per requested access profile (the flags that make the CLI non-interactive under that profile). An EMPTY record means the CLI's own native behavior is accepted for every profile; a non-empty record declares exactly which profiles it can honor, and an undeclared profile is refused instead of silently downgraded."
+              },
+              "provider_family": {
+                "type": "string",
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "google",
+                  "cursor",
+                  "opencode",
+                  "xai",
+                  "local",
+                  "unknown"
+                ],
+                "description": "Vendor family for route-diversity reasoning.",
+                "default": "unknown"
+              }
+            },
+            "required": [
+              "id",
+              "display_name",
+              "command"
+            ],
+            "additionalProperties": false
+          },
+          "default": [],
+          "description": "User-defined external agent CLIs; each registers a harness usable as an AI agent without writing adapter code."
+        },
         "mcp": {
           "type": "object",
           "properties": {
@@ -657,7 +793,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, MCP servers, and skills."
+      "description": "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, external harnesses, MCP servers, and skills."
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#"

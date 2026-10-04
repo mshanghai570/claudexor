@@ -15,6 +15,7 @@ import { createAgyAdapter } from "@claudexor/harness-agy";
 import { createClaudeAdapter } from "@claudexor/harness-claude";
 import { createCodexAdapter } from "@claudexor/harness-codex";
 import { createCursorAdapter } from "@claudexor/harness-cursor";
+import { createExternalHarnessAdapter } from "@claudexor/harness-external";
 import { FAKE_KINDS, createFakeHarness } from "@claudexor/harness-fake";
 import { createOpenCodeAdapter } from "@claudexor/harness-opencode";
 import { createRawApiAdapter } from "@claudexor/harness-raw-api";
@@ -70,6 +71,26 @@ function providerAdapters(): HarnessAdapter[] {
   );
 }
 
+/**
+ * Spawn one generic adapter per config-declared external agent CLI row
+ * (`global.external_harnesses`: Cline, Gemini, Kilo, Copilot, ...). A row whose
+ * config fails to parse is skipped with a stderr warning — registry
+ * construction must never throw on bad user data; the daemon's doctor surface
+ * reports it.
+ */
+function externalAdapters(): HarnessAdapter[] {
+  let rows: Array<Parameters<typeof createExternalHarnessAdapter>[0]> = [];
+  try {
+    rows = loadConfig(process.cwd()).global.external_harnesses ?? [];
+  } catch (err) {
+    console.error(
+      `[claudexor] external harnesses config unavailable (${err instanceof Error ? err.message : String(err)}); configured external harnesses are disabled`,
+    );
+    return [];
+  }
+  return rows.map((row) => createExternalHarnessAdapter(row));
+}
+
 export function buildRegistry(opts: RegistryOptions = {}): AdapterRegistry {
   const registry: AdapterRegistry = new Map();
   for (const adapter of [
@@ -88,6 +109,7 @@ export function buildRegistry(opts: RegistryOptions = {}): AdapterRegistry {
       defaultModel: process.env.CLAUDEXOR_OPENROUTER_MODEL ?? "openai/gpt-5.5",
     }),
     ...providerAdapters(),
+    ...externalAdapters(),
   ]) {
     registry.set(adapter.id, adapter);
   }

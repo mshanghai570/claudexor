@@ -55,6 +55,13 @@ export interface CliRunLoopOptions {
    * recognized-but-intentionally-skipped events (progress ticks etc.).
    */
   parseEvent: (obj: unknown, sessionId: string) => HarnessEvent[] | null;
+  /**
+   * Translate one raw stdout line that is NOT valid JSON (the `stream: "text"`
+   * contract for config-declared external CLIs). Return `null` for lines that
+   * should count as dropped, `[]` for recognized-but-skipped lines (blanks).
+   * When absent (every JSON-emitting adapter), an unparsable line is dropped.
+   */
+  parseLine?: (line: string, sessionId: string) => HarnessEvent[] | null;
   env?: Record<string, string | null | undefined>;
   /** Label used in synthesized error messages; defaults to `bin`. */
   label?: string;
@@ -178,6 +185,24 @@ export async function* runCliHarness(opts: CliRunLoopOptions): AsyncGenerator<Ha
       try {
         obj = JSON.parse(ev.line);
       } catch {
+        if (opts.parseLine) {
+          const lineEvents = opts.parseLine(ev.line, spec.session_id);
+          if (lineEvents === null) {
+            droppedUnparsedLines += 1;
+            continue;
+          }
+          let lineStop = false;
+          for (const out of lineEvents) {
+            if (out.type === "error") sawError = harnessReportedError = true;
+            yield out;
+            if (opts.stopAfterEvent?.(out)) {
+              lineStop = true;
+              break;
+            }
+          }
+          if (lineStop) break;
+          continue;
+        }
         droppedUnparsedLines += 1;
         continue;
       }

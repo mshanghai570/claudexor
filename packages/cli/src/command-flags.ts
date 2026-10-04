@@ -280,7 +280,32 @@ export const CLI_FLAGS: readonly CliFlagSpec[] = [
   valueFlag(
     "display-name",
     "<name>",
-    "profiles add: human-readable label for the new credential profile",
+    "profiles add: human-readable label for the new credential profile;\n                           harness add: display name for the external harness row",
+  ),
+  valueFlag(
+    "command",
+    "<bin>",
+    "harness add: executable for a custom config-declared external harness",
+  ),
+  valueFlag(
+    "arg",
+    "<token>",
+    "harness add: one argv token for the external CLI (repeat; write --arg=<token> for a value starting with -)",
+  ),
+  valueFlag(
+    "model-arg",
+    "<token>",
+    "harness add: one argv token carrying {model} for the external CLI (repeat)",
+  ),
+  valueFlag(
+    "stream",
+    "<jsonl|text>",
+    "harness add: how the external CLI writes stdout (jsonl = one JSON object per line, text = prose)",
+  ),
+  valueFlag(
+    "key-env",
+    "<VAR>",
+    "harness add: env var (or SecretStore slot) holding the external CLI's API key",
   ),
   valueFlag("from-env", "<VAR>", null),
   booleanFlag("allow-full-access", null),

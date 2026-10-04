@@ -6,6 +6,7 @@ import {
   ExternalContextPolicy,
   NonBlankString,
 } from "./primitives.js";
+import { ExternalHarnessList } from "./external-harness.js";
 import { EffortHint } from "./harness.js";
 import { CredentialProfile } from "./credential-profile.js";
 import { PaidBudget, PaidFallback, QualityTierSet, RoutingGoal } from "./budget.js";
@@ -510,6 +511,13 @@ export const GlobalConfig = z
         "User-defined OpenAI-compatible providers; each registers a raw-API harness usable as an AI agent.",
       ),
     /**
+     * User-defined external agent CLIs (Cline, Gemini, Kilo, Copilot, Aider,
+     * Grok, Devin, Mistral Vibe, ...): each row registers one harness that runs
+     * the declared command — no adapter source, credentials stay in slots.
+     * Row shape and uniqueness/collision rules live in external-harness.ts.
+     */
+    external_harnesses: ExternalHarnessList,
+    /**
      * User-defined MCP servers injected into harness sandboxes on every run
      * (alongside the delegation belt). Names share the delegation belt's
      * namespace rules and may not collide with it.
@@ -571,7 +579,7 @@ export const GlobalConfig = z
   })
   .strict()
   .describe(
-    "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, MCP servers, and skills.",
+    "Claudexor v3 global user config (~/.claudexor/v3/config.yaml): routing, budget, runtime, per-harness settings, providers, external harnesses, MCP servers, and skills.",
   );
 export type GlobalConfig = z.infer<typeof GlobalConfig>;
 

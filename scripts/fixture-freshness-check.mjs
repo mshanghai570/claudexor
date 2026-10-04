@@ -96,6 +96,8 @@ const NO_FIXTURES_EXEMPT = {
   "harness-fake": "the fake harnesses ARE the deterministic synthetic sources other suites consume",
   "harness-raw-api":
     "no native CLI stream exists to record; the adapter consumes the OpenAI-compatible HTTP API shape directly (unit-tested in-package)",
+  "harness-external":
+    "config-declared rows parse whichever shape the operator declares (jsonl|text), so no single vendor stream exists to record; the generic parser is unit-tested in-package against the frame shapes the shipped presets emit",
 };
 const packagesDir = join(root, "packages");
 const allHarnessPkgs = readdirSync(packagesDir).filter((d) => d.startsWith("harness-"));

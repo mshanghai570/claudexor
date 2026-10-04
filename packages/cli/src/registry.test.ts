@@ -5,6 +5,9 @@ vi.mock("@claudexor/secrets", async (importOriginal) => ({
   resolveSecret: () => null,
 }));
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HarnessEvent, HarnessRunSpec } from "@claudexor/schema";
 import { buildRegistry } from "./registry.js";
 
@@ -131,5 +134,40 @@ describe("built-in raw-api registry cost wiring", () => {
       observed_model: "compatible/model",
     });
     expect(usageEvent.usage).not.toHaveProperty("cost_usd");
+  });
+});
+
+describe("config-declared external harnesses", () => {
+  it("registers one adapter per external_harnesses row (config, not source)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claudexor-external-registry-"));
+    vi.stubEnv("CLAUDEXOR_CONFIG_DIR", dir);
+    writeFileSync(
+      join(dir, "config.yaml"),
+      [
+        "version: 1",
+        "external_harnesses:",
+        "  - id: ext-cfg",
+        "    display_name: Config Declared",
+        "    command: /bin/echo",
+        "    stream: jsonl",
+        "",
+      ].join("\n"),
+    );
+    try {
+      const adapter = buildRegistry({ includeFakes: false }).get("ext-cfg");
+      expect(adapter).toBeDefined();
+      await expect(adapter!.discover()).resolves.toMatchObject({
+        id: "ext-cfg",
+        display_name: "Config Declared",
+        kind: "local_cli",
+        capabilities: { model_inventory_absence: "advisory" },
+      });
+      // Built-in ids stay owned by the built-in adapter (schema forbids a
+      // config row from shadowing one).
+      expect(buildRegistry({ includeFakes: false }).get("codex")?.id).toBe("codex");
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
